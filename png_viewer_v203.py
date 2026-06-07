@@ -59,7 +59,7 @@ PNG/画像メタデータビューア - PySide6版
 修正履歴: CHANGELOG.md を参照
 変更点: AI品質仕分けを削除し、位置ルーラーを維持
 
-[v2.18] — 最新バージョン。詳細は CHANGELOG.md を参照。
+[v2.19] — 最新バージョン。詳細は CHANGELOG.md を参照。
 """
 
 import sys, os, re, json, struct, zlib, shutil, hashlib, threading, pickle
@@ -110,7 +110,7 @@ except ImportError:
 # ══════════════════════════════════════════════════════════════════════════════
 #  定数・設定
 # ══════════════════════════════════════════════════════════════════════════════
-APP_VERSION  = "v2.18"
+APP_VERSION  = "v2.19"
 APP_NAME     = "PNG Metadata Viewer"
 APP_AUTHOR   = "nemot"
 _APP_ICON_B64 = (
@@ -771,10 +771,41 @@ _RE_QUERY_SPLIT = re.compile(r"[,、\n]+")
 _RE_NEG       = re.compile(r"\nNegative prompt:", re.IGNORECASE)
 _RE_STEPS     = re.compile(r"\nSteps:", re.IGNORECASE)
 _RE_LORA      = re.compile(r"<lora:([^:>]+)(?::([^>]*))?>" )
+_RE_LORA_FULL = re.compile(r"^<lora:([^:>]+)(?::([^>]*))?>$", re.IGNORECASE)
 _RE_PARAM     = re.compile(r"(?:^|,\s*)(\w[\w\s]*):\s*([^,\n]+)", re.MULTILINE)
 
 def norm_tag(t: str) -> str:
     return _RE_NORM.sub(" ", t.strip().lower())
+
+def _split_prompt_tokens(text: str) -> list[str]:
+    """プロンプト文字列をカンマ区切りベースで分割しつつ、LoRAタグは単独トークン扱いにする。"""
+    if not text or not text.strip():
+        return []
+    tokens: list[str] = []
+    pos = 0
+    for m in _RE_LORA.finditer(text):
+        before = text[pos:m.start()]
+        if before:
+            tokens.extend(t.strip() for t in _RE_SPLIT_CSV.split(before) if t.strip())
+        lora = m.group(0).strip()
+        if lora:
+            tokens.append(lora)
+        pos = m.end()
+    tail = text[pos:]
+    if tail:
+        tokens.extend(t.strip() for t in _RE_SPLIT_CSV.split(tail) if t.strip())
+    return tokens
+
+def _normalize_lora_token(token: str) -> str:
+    """LoRAタグを重複判定用に正規化する。強度はあれば保持、なければ省略する。"""
+    m = _RE_LORA_FULL.match(token.strip())
+    if not m:
+        return token.strip()
+    name = " ".join(norm_tag(m.group(1)).split())
+    strength = (m.group(2) or "").strip()
+    if strength:
+        return f"<lora:{name}:{strength}>"
+    return f"<lora:{name}>"
 
 def tag_list(text: str) -> list:
     if not text or not text.strip(): return []
@@ -808,14 +839,17 @@ def tags_match(tags: list[str], queries: list[str], require_all: bool = False) -
 
 def dedup_tags(text: str):
     if not text.strip(): return text, 0
-    tokens = _RE_SPLIT_CSV.split(text.strip())
+    tokens = _split_prompt_tokens(text.strip())
     seen, out, removed = set(), [], 0
     for t in tokens:
         t_s = t.strip()
         if not t_s: continue
-        # 正規表現(_RE_NORM)を廃止し純粋な文字列操作に置換（高速化 v1.80）
-        k = t_s.lower().replace("_", " ")
-        k = " ".join(k.split())
+        if t_s.startswith("<lora:") and t_s.endswith(">"):
+            k = _normalize_lora_token(t_s)
+        else:
+            # 正規表現(_RE_NORM)を廃止し純粋な文字列操作に置換（高速化 v1.80）
+            k = t_s.lower().replace("_", " ")
+            k = " ".join(k.split())
         if k not in seen:
             seen.add(k)
             out.append(t_s)
