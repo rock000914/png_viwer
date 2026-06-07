@@ -59,7 +59,7 @@ PNG/画像メタデータビューア - PySide6版
 修正履歴: CHANGELOG.md を参照
 変更点: AI品質仕分けを削除し、位置ルーラーを維持
 
-[v2.19] — 最新バージョン。詳細は CHANGELOG.md を参照。
+[v2.20] — 最新バージョン。詳細は CHANGELOG.md を参照。
 """
 
 import sys, os, re, json, struct, zlib, shutil, hashlib, threading, pickle
@@ -110,7 +110,7 @@ except ImportError:
 # ══════════════════════════════════════════════════════════════════════════════
 #  定数・設定
 # ══════════════════════════════════════════════════════════════════════════════
-APP_VERSION  = "v2.19"
+APP_VERSION  = "v2.20"
 APP_NAME     = "PNG Metadata Viewer"
 APP_AUTHOR   = "nemot"
 _APP_ICON_B64 = (
@@ -6980,7 +6980,8 @@ class MainWindow(QMainWindow):
         self._set_status("AI評価キャッシュを再読込しました")
         self._apply_filter()
         try:
-            self._grid._full_rebuild()
+            # キャッシュ再読込だけでは一覧位置を戻さない
+            self._grid._full_rebuild(reset_scroll=False)
         except Exception:
             pass
         self._update_quality_footer()
@@ -8235,7 +8236,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_grid"):
             for p in path_set:
                 self._grid._pixmap_cache.pop(p, None)
-            self._grid._full_rebuild()
+            # ロゴ更新時は一覧位置を維持する
+            self._grid._full_rebuild(reset_scroll=False)
         if self._sel_path in path_set:
             self._update_preview(self._sel_path)
             if hasattr(self, "_layout_preview") and self._layout_preview:
@@ -9172,7 +9174,8 @@ class MainWindow(QMainWindow):
                 self._splitter_save_timer.start()
         hsplit.splitterMoved.connect(_save_BC)
 
-        self._grid._full_rebuild()
+        # レイアウト切替で一覧位置を維持する
+        self._grid._full_rebuild(reset_scroll=False)
 
         if self._sel_path:
             self._layout_update_preview(self._sel_path)
@@ -9242,7 +9245,8 @@ class MainWindow(QMainWindow):
                 self._splitter_save_timer.start()
         vsplit.splitterMoved.connect(_save_D)
 
-        self._grid._full_rebuild()
+        # レイアウト切替で一覧位置を維持する
+        self._grid._full_rebuild(reset_scroll=False)
 
         if self._sel_path:
             self._layout_update_preview(self._sel_path)
@@ -9468,7 +9472,8 @@ class MainWindow(QMainWindow):
                 cl.addWidget(self._grid, 1)
                 self._grid.show()
                 # addWidget/show 完了後に即 _full_rebuild（singleShot は使わない）
-                self._grid._full_rebuild()
+                # グリッドを元の親へ戻すだけなのでスクロール位置を維持する
+                self._grid._full_rebuild(reset_scroll=False)
 
         # A/D/C/E が強制 hide した右パネルを復元
         # _user_collapsed_right=True（ユーザーが意図的に閉じた）場合は復元しない
