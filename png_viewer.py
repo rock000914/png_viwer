@@ -1,7 +1,27 @@
-﻿"""
-PNG/画像メタデータビューア - PySide6版
+"""
+PNG/画像メタデータビューア - PySide6版 (v2.10 — 詳細検索)
 ================================================================================
 【このファイルについて — AI・開発者向け】
+
+  v2.05.1 は v2.04 に対し、コードレビューで指摘された Critical 問題 18件 +
+  パフォーマンス最適化 3点 を適用した版。
+
+  ■ Critical 修正 18件
+  セキュリティ: S1 (pickle.loads廃止), S2 (MetaCache JSON化), S3 (PNG chunk長検証), S4 (save_png_params)
+  スレッド安全: T1 (QPixmap→QImage), T2 (wait追加), T3 (LoraStatsスレッド参照),
+                T4 (DuplicateDetect例外), T5 (QThreadPool化), T6 (quality_cacheコピー)
+  データ整合性: D1 (_checked fpath化), D2 (_refresh解消), D3 (_thumbsクリア),
+                D4 (レイアウトD サイズ退避), D5 (スプリッタ保存),
+                D6 (_mem選択削除), D7 (scene.clear廃止), D8 (PyInstaller互換)
+
+  ■ パフォーマンス最適化 3点
+  D5-opt: スプリッタ即時 save_cfg() をデバウンス (500ms) 経由に変更。ドラッグ中のカクつき解消。
+  S2-opt: MetaCache を orjson で高速シリアライズ (3万件: 数秒→数百ms)。フォールバック付き。
+  T1-opt: _on_pixmap_loaded で qi.copy() を廃止 (Qt COW 管理)。4K画像で 100-300ms 高速化。
+
+  ■ バグ修正 (v2.05.2)
+  ENTER-FIX: アドレスバー(QLineEdit)で Enter を押してもフォルダ移動せず FullViewer が開く問題を修正。
+             _on_key_enter に QLineEdit フォーカスガードを追加。
 
   tkinter版 (v11) を PySide6 で完全書き直したデスクトップアプリ。
   Windows 10/11 + Python 3.11以上 + PySide6 + Pillow で動作。
@@ -32,7 +52,7 @@ PNG/画像メタデータビューア - PySide6版
   グローバル QSS (QSS変数) で全ウィジェットのダークテーマを一元管理。
   ボタン種別は setObjectName で識別:
     "layout_btn"      : レイアウト切り替えボタン (A〜E)
-    "panel_toggle_btn": ◀フォルダ / メタ▶ パネル表示切り替え
+    "panel_toggle_btn": ☰ログ の表示切り替え（◀フォルダ / ▶メタ は両端バー ≡ へ移設）
     "tab_btn"         : メタ情報/タグ一覧 タブボタン
     "accent"          : アクセントカラーボタン
     "danger"          : 削除系ボタン
@@ -57,17 +77,78 @@ PNG/画像メタデータビューア - PySide6版
   ファイルを出力・修正するたびにバージョンを必ず上げること（例: v1.26 → v1.27）
 ================================================================================
 修正履歴: CHANGELOG.md を参照
-変更点: AI品質仕分けを削除し、位置ルーラーを維持
+変更点: Windowsで全画面から最大化へ戻す途中の一時的な縮小・移動を抑制
 
-[v2.20] — 最新バージョン。詳細は CHANGELOG.md を参照。
+[v2.22] — サムネイルサイズバー（▦ + スライダー + px表示）をツールバーから
+フッター（QStatusBar）右端の常設ウィジェットへ移設。ツールバーは検索・並び替え・
+フィルタ系に集中させ、サイズ操作は画面下端で常にReachableになった。
+スライダーは 110px → 140px に拡幅してフッターでの操作性を確保。
+Ctrl+ホイール / レイアウトDの一時変更 / 設定保存は同じ _size_slider を共有するため従来どおり同期。
+詳細は CHANGELOG.md を参照。
+
+[v2.21] — ツールバー右端に残っていた ◀（フォルダツリー表示/非表示）を削除。
+v2.20 で ▶ を撤去した際、◀ は「新たな重複ではない」として残置したが、左端の縦バー ≡ と
+同一操作であることに変わりはなく、ツールバー右上にボタンだけが残って見えていた。
+`_toggle_left_btn` の生成・add_w・全状態同期（4箇所）を撤去し、参照は grep 0 件。
+左パネルの開閉は 左端 ≡ と メニュー「📁 フォルダパネルを表示」の2経路（右と完全に対）。
+詳細は CHANGELOG.md を参照。
+
+[v2.20] — 右端の縦バーボタンを「右カラムそのものの開閉」に作り替えた。
+v2.19 で右カラムの先頭に付けた ≡ はフォルダツリー開閉の誤りで、右パネルを畳むと
+ボタンも一緒に消えて二度と開けなかった。バーを QSplitter の外（右隣 22px 固定）へ
+移したので、右カラムを畳んでも ≡ は残り、そこから元に戻せる。左の ≡ と完全に対。
+これによりツールバーの ▶（メタパネル表示切り替え）は重複になったため削除。
+右パネルの開閉は 右端 ≡ と メニュー「📐 メタパネルを表示」の2経路。
+詳細は CHANGELOG.md を参照。
+
+[v2.19] — サムネイルサイズバーをツールバーへ復活（従来は非表示の内部スライダーで、
+Ctrl+ホイールでしか変えられなかった）。右カラム端にもフォルダツリー開閉の ≡ を追加。
+実機 24チェック / FAIL 0（.tmp/v219_probe.py）。詳細は CHANGELOG.md を参照。
+
+[v2.18] — C: 逼迫対応。サムネ disk cache（実測 13.71GB / 134,985件）を settings.json の
+`thumb_cache_dir` で任意ドライブへ移せるようにした。H: へ移設した結果、C: の空きは
+5.59GB → 46.86GB。コピー先へ全件 size+mtime 一致・抽样400件 SHA256 一致を確認してから
+元を削除するので再生成コストもゼロ。メニューに「💾 サムネキャッシュの保存先と容量」を追加。
+詳細は CHANGELOG.md を参照。
+
+[v2.17] — ビュアー（FullViewer）の2件を修正。Space の没入切替で画像が異様に小さかったのは
+原寸(actual)固定のまま画面だけ広がっていたため（実測 占有60.2% → fit 適用で99.3%）。
+「読み込み中...」は待機表示を300ms遅延＋隣接画像の先読みで送り每次12/12回 → 0/12回にした。
+詳細は CHANGELOG.md を参照。
+
+[v2.16] — 詳細検索パネルの誤作動11件を修正（正規表現の _ 未ヒット・日付入力の静かな誤結果・
+● の切れ・シード欄の固定幅・↑履歴の無反応・Enter以外で履歴が残らない・条件が復元されない・
+シードだけ入力で ● が付かない・✕が見えない・履歴0件の無地表示・寸法不明の扱い）。詳細は CHANGELOG.md を参照。
+
+[v2.15] — ツールバーを1行化（前置ラベル廃止・モデル未選択はplaceholder表示・左右パネル/ログを36px角ボタンに）。カラーリングは据え置き。詳細は CHANGELOG.md を参照。
+
+[v2.14] — PNGテキストチャンク読取の正確化（iTXt/zTXt/UTF-8復号）、メモリLRU化、グリッド索引のO(1)化。詳細は CHANGELOG.md を参照。
+
+[v2.10] — 詳細検索パネル（検索範囲・除外語・正規表現・範囲・履歴）。詳細は CHANGELOG.md を参照。
+
+[v2.09] — 系統表示名。詳細は CHANGELOG.md を参照。
+
+[v2.07] — 表示切替プルダウン化（詳細は CHANGELOG.md を参照）。
+
+[v2.06] — ロード速度改善第1弾（詳細は CHANGELOG.md を参照）。
+
+[v2.04] — コードレビュー指摘事項の修正:
+  1. MetaCache に peek()/has()/keys() を追加し、外部からの _d/_lock 直接アクセスを廃止
+  2. save_png_params をアトミック書き込みに変更（一時ファイル経由 os.replace）
+  3. _build_app_icon の一時ファイルを QPixmap 変換後に削除するよう修正
+  4. save_cfg / save_ratings / load_quality_cache の裸 except を Exception に統一
+  5. _cache_key / load_thumb_image / load_preview_image / clear_cache 等の裸 except を修正
+  6. ScanWorker の stat 取得 / FilterWorker / civitai_open_lora 等の裸 except を修正
+  7. MainWindow 内の裸 except を修正
+  8. QAction as QAction2 の重複インポートを削除
 """
 
-import sys, os, re, json, struct, zlib, shutil, hashlib, threading, pickle
+import sys, os, re, json, struct, zlib, shutil, hashlib, threading, pickle, time
 import subprocess
 import random, webbrowser, csv, concurrent.futures
 from pathlib import Path
-from datetime import datetime
-from collections import Counter
+from datetime import datetime, timedelta
+from collections import Counter, OrderedDict
 
 # ── PySide6 imports ────────────────────────────────────────────────────────
 from PySide6.QtWidgets import (
@@ -85,7 +166,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import (
     QPixmap, QImage, QIcon, QPainter, QColor, QFont, QFontMetrics,
-    QPalette, QCursor, QKeySequence, QAction, QAction as QAction2,
+    QPalette, QCursor, QKeySequence, QAction,
     QStandardItemModel, QStandardItem,
     QTransform, QBrush, QPen, QLinearGradient,
     QDrag, QImageReader,
@@ -96,7 +177,7 @@ from PySide6.QtCore import (
     QTimer, QThread, Signal, Slot, QObject,
     QSettings, QModelIndex, QSortFilterProxyModel,
     QAbstractTableModel, QItemSelectionModel,
-    QMimeData, QUrl, QRunnable, QThreadPool,
+    QMimeData, QUrl, QRunnable, QThreadPool, QSaveFile, QIODevice,
     QPropertyAnimation, QEasingCurve,
     QFileSystemWatcher, QDir, QEvent,
 )
@@ -104,13 +185,13 @@ from PySide6.QtCore import (
 try:
     from PIL import Image, ImageQt, ImageFilter, ImageStat
 except ImportError:
-    print("Pillow が見つかりません。pip install Pillow を実行してください。")
+    print(T("Pillow が見つかりません。pip install Pillow を実行してください。"))
     sys.exit(1)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  定数・設定
 # ══════════════════════════════════════════════════════════════════════════════
-APP_VERSION  = "v2.20"
+APP_VERSION  = "v2.26"
 APP_NAME     = "PNG Metadata Viewer"
 APP_AUTHOR   = "nemot"
 _APP_ICON_B64 = (
@@ -118,12 +199,681 @@ _APP_ICON_B64 = (
 )
 
 APP_DIR      = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "png_viewer"
-CACHE_DIR    = APP_DIR / "thumbs"
 SETTINGS_FILE= APP_DIR / "settings.json"
+
+
+# ── 多言語対応 (i18n) ──────────────────────────────────────────────────────
+# UI文字列は T("...") / f-string 内では Te("...") でラップされる。
+# 表示言語は settings.json の "language" で指定 (ja / en / zh / ko)。
+# 未登録の文字列は日本語のまま表示される（フォールバック）。
+# 言語を変更した場合はアプリ再起動後に反映される（メイン画面の既存ウィジェットは
+# 再生成されないため）。
+SUPPORTED_LANGUAGES = [
+    ("ja", "日本語"),
+    ("en", "English"),
+    ("zh", "中文（简体）"),
+    ("ko", "한국어"),
+]
+_LANGUAGE_LABELS = dict(SUPPORTED_LANGUAGES)
+
+def _load_ui_language() -> str:
+    try:
+        lang = str(json.loads(SETTINGS_FILE.read_text("utf-8")).get("language", "ja") or "ja")
+    except Exception:
+        lang = "ja"
+    return lang if lang in _LANGUAGE_LABELS else "ja"
+
+_UI_LANG = _load_ui_language()
+
+def set_ui_language(lang: str) -> None:
+    """UI言語を切り替える（以降の T() 呼び出しに反映。再起動後に完全反映）。"""
+    global _UI_LANG
+    _UI_LANG = lang if lang in _LANGUAGE_LABELS else "ja"
+
+def T(s):
+    """UI文字列を現在の言語に翻訳する。未登録なら元の文字列を返す。"""
+    table = _I18N_TABLE.get(s)
+    if table:
+        out = table.get(_UI_LANG)
+        if out:
+            return out
+    return s
+
+import ast as _ast
+
+def Te(s):
+    """f-string内の翻訳用ヘルパー。マーカー文字を元の特殊文字へ戻し、
+    生のソースエスケープ（\n, \u3000 等）も評価してからT()へ渡す。"""
+    for marker, ch in (('␚', "'"), ('␛', '"'), ('␜', '\\'),
+                       ('␊', '\n'), ('␍', '\r'), ('␉', '\t')):
+        s = s.replace(marker, ch)
+    try:
+        s = _ast.literal_eval(" + s + ")
+    except Exception:
+        try:
+            s = _ast.literal_eval('"""' + s + '"""')
+        except Exception:
+            pass
+    return T(s)
+
+# ── 翻訳テーブル（UI文字列の多言語対応） ─────────────────────────
+# キーは画面に表示される文字列そのもの。改行などを含む。未登録の文字列は
+# 日本語のまま表示される。
+_I18N_TABLE = {
+    '\n\nお気に入りから削除しますか？': {"en": '\n\nRemove from favorites?', "zh": '\n\n要从收藏中删除吗？', "ko": '\n\n즐겨찾기에서 삭제하시겠습니까?'},
+    '\n\nこのファイルを ': {"en": '\n\nThis file ', "zh": '\n\n此文件', "ko": '\n\n이 파일을 '},
+    '\n\n保存先を変える場合は settings.json に絶対パスの `thumb_cache_dir` を指定します。移行時は先に丸ごとコピーし、全件サイズ一致を確認してから元を削除してください（コピー先に `.fmt_version` が無いと起動時の自動消去で全キャッシュが消えます）。': {"en": '\n\nTo change the location, set an absolute path `thumb_cache_dir` in settings.json. When migrating, copy everything first, verify that all file sizes match, then delete the original (without `.fmt_version` in the destination, the automatic cleanup at startup will delete the entire cache).', "zh": '\n\n如需更改保存位置，请在 settings.json 中指定绝对路径 `thumb_cache_dir`。迁移时请先完整复制，确认所有文件大小一致后再删除原文件（如果目标位置没有 `.fmt_version`，启动时的自动清理会删除全部缓存）。', "ko": '\n\n저장 위치를 변경하려면 settings.json 에 절대 경로 `thumb_cache_dir` 를 지정하세요. 마이그레이션 시에는 먼저 전체를 복사하고 모든 파일 크기가 일치하는지 확인한 뒤 원본을 삭제하세요 (대상에 `.fmt_version` 이 없으면 시작 시 자동 정리로 전체 캐시가 삭제됩니다).'},
+    '\n\n既存のロゴ画像を新しい保存先へ移動しますか？': {"en": '\n\nMove existing logo images to the new location?', "zh": '\n\n是否将现有 Logo 图片移动到新的保存位置？', "ko": '\n\n기존 로고 이미지를 새 저장 위치로 이동하시겠습니까?'},
+    '\n  … 他 ': {"en": '\n  … and ', "zh": '\n  … 等 ', "ko": '\n  … 외 '},
+    '\n...他': {"en": '\n...more', "zh": '\n...等', "ko": '\n...외'},
+    '\n[パラメータ解析エラー: ': {"en": '\n[Parameter parse error: ', "zh": '\n[参数解析错误：', "ko": '\n[파라미터 해석 오류: '},
+    '\n※ 保存先を変更しても、ここに表示されている場所が現在の保存先です。': {"en": '\n※ Even if the location is changed, the path shown here is the current save location.', "zh": '\n\n※ 即使更改了保存位置，这里显示的仍然是当前保存位置。', "ko": '\n\n※ 저장 위치를 변경해도 여기에 표시된 경로가 현재 저장 위치입니다.'},
+    '\n← 前の画像  |  Esc/Enter で閉じる': {"en": '\n← Previous image  |  Esc/Enter to close', "zh": '\n← 上一张图片  |  按 Esc/Enter 关闭', "ko": '\n← 이전 이미지  |  Esc/Enter 로 닫기'},
+    '\nうち旧形式 .pkl が ': {"en": '\nof which legacy .pkl format ', "zh": '\n其中旧格式 .pkl ', "ko": '\n그중 구형식 .pkl 이 '},
+    '\nこのファイルを ': {"en": '\nThis file ', "zh": '\n此文件', "ko": '\n이 파일을 '},
+    '\nキーボードショートカット\n\n[ファイル操作]\nCtrl+O          フォルダを開く\nF5              更新（再読み込み）\nF2              名前の変更\nDelete          ゴミ箱に移動（複数選択対応）\nShift+Delete    完全削除（ゴミ箱を使わない）\nCtrl+C          コピー（ファイルとして）\nCtrl+X          切り取り\nCtrl+V          貼り付け\nCtrl+Shift+N    新しいフォルダを作成\n\n[ブックマーク]\nCtrl+B          ブックマーク一覧を表示\nCtrl+Shift+B    現在のフォルダをブックマークに追加\n\n[選択]\nCtrl+A          すべて選択\nCtrl+D          選択解除\nCtrl+クリック   個別追加/解除\nShift+クリック  範囲選択\nShift+矢印      選択範囲を拡張\nドラッグ        矩形ドラッグで範囲選択\nEscape          複数選択を解除して単一選択に戻す\n\n[グリッド操作]\n←↑↓→          カーソル移動\nPageUp/Down     ページ単位で移動\nHome / End      先頭 / 末尾に移動\nEnter           全画面表示\nCtrl+ホイール   サムネサイズ変更\n\n[フォルダ移動]\nCtrl+Left/Right 前後のフォルダ\nAlt+Left/Right  前後のフォルダ\nAlt+Up          親フォルダへ移動\n\n[表示・情報]\nAlt+Enter       プロパティ\nF1              このヘルプ\nCtrl+,          環境設定\n\n[起動時]\n前回開いていたフォルダを自動復元します。\n\n[右パネル]\nプレビューと情報エリアの境界をドラッグしてリサイズ可能\n\n[FullViewer]\n←→↑↓ PgUp/Dn  前後の画像\nSpace / F11     没入モード ON/OFF\nR               回転    +/-  ズーム\n0               等倍    S    スライドショー\nEsc/Enter       閉じる  Delete  削除\n': {"en": '\nKeyboard shortcuts\n\n[File operations]\nCtrl+O          Open folder\nF5              Refresh (reload)\nF2              Rename\nDelete          Move to Recycle Bin (multi-select)\nShift+Delete    Delete permanently (bypass Recycle Bin)\nCtrl+C          Copy (as files)\nCtrl+X          Cut\nCtrl+V          Paste\nCtrl+Shift+N    New folder\n\n[Bookmarks]\nCtrl+B          Show bookmark list\nCtrl+Shift+B    Add current folder to bookmarks\n\n[Selection]\nCtrl+A          Select all\nCtrl+D          Deselect\nCtrl+Click      Toggle individual selection\nShift+Click     Range selection\nShift+Arrow     Extend selection range\nDrag            Rectangle drag selection\nEscape          Clear multi-selection, back to single selection\n\n[Grid]\n←↑↓→          Move cursor\nPageUp/Down     Move page by page\nHome / End      Move to start / end\nEnter           Fullscreen view\nCtrl+Wheel      Change thumbnail size\n\n[Folder navigation]\nCtrl+Left/Right Previous / next folder\nAlt+Left/Right  Previous / next folder\nAlt+Up          Go up to parent folder\n\n[View / info]\nAlt+Enter       Properties\nF1              This help\nCtrl+,          Settings\n\n[On startup]\nAutomatically restores the folder that was open last time.\n\n[Right panel]\nDrag the boundary between the preview and info areas to resize\n\n[FullViewer]\n←→↑↓ PgUp/Dn  Previous / next image\nSpace / F11     Immersive mode ON/OFF\nR               Rotate    +/-  Zoom\n0               Actual size    S    Slideshow\nEsc/Enter       Close    Delete  Delete\n', "zh": '\n键盘快捷键\n\n[文件操作]\nCtrl+O          打开文件夹\nF5              刷新（重新加载）\nF2              重命名\nDelete          移动到回收站（支持多选）\nShift+Delete    彻底删除（不使用回收站）\nCtrl+C          复制（作为文件）\nCtrl+X          剪切\nCtrl+V          粘贴\nCtrl+Shift+N    新建文件夹\n\n[书签]\nCtrl+B          显示书签列表\nCtrl+Shift+B    将当前文件夹添加到书签\n\n[选择]\nCtrl+A          全选\nCtrl+D          取消选择\nCtrl+点击       单个添加/取消\nShift+点击      范围选择\nShift+方向键    扩展选择范围\n拖动            矩形框选\nEscape          取消多选，恢复单选\n\n[网格操作]\n←↑↓→          移动光标\nPageUp/Down     按页移动\nHome / End      移动到开头 / 末尾\nEnter           全屏显示\nCtrl+滚轮       缩略图大小\n\n[文件夹移动]\nCtrl+Left/Right 上一/下一文件夹\nAlt+Left/Right  上一/下一文件夹\nAlt+Up          返回上级文件夹\n\n[显示/信息]\nAlt+Enter       属性\nF1              此帮助\nCtrl+,          设置\n\n[启动时]\n自动恢复上次打开的文件夹。\n\n[右面板]\n拖动预览和信息区域之间的边界可调整大小\n\n[FullViewer]\n←→↑↓ PgUp/Dn  上一张/下一张图片\nSpace / F11     沉浸模式 ON/OFF\nR               旋转    +/-  缩放\n0               实际大小    S    幻灯片\nEsc/Enter       关闭    Delete  删除\n', "ko": '\n키보드 단축키\n\n[파일 작업]\nCtrl+O          폴더 열기\nF5              새로고침 (다시 불러오기)\nF2              이름 변경\nDelete          휴지통으로 이동 (다중 선택 지원)\nShift+Delete    완전 삭제 (휴지통 사용 안 함)\nCtrl+C          복사 (파일로)\nCtrl+X          잘라내기\nCtrl+V          붙여넣기\nCtrl+Shift+N    새 폴더 만들기\n\n[북마크]\nCtrl+B          북마크 목록 표시\nCtrl+Shift+B    현재 폴더를 북마크에 추가\n\n[선택]\nCtrl+A          전체 선택\nCtrl+D          선택 해제\nCtrl+클릭       개별 추가/해제\nShift+클릭      범위 선택\nShift+화살표    선택 범위 확장\n드래그          사각형 드래그로 범위 선택\nEscape          다중 선택 해제 후 단일 선택으로\n\n[그리드 조작]\n←↑↓→          커서 이동\nPageUp/Down     페이지 단위로 이동\nHome / End      처음 / 끝으로 이동\nEnter           전체 화면 표시\nCtrl+휠         썸네일 크기 변경\n\n[폴더 이동]\nCtrl+Left/Right 이전/다음 폴더\nAlt+Left/Right  이전/다음 폴더\nAlt+Up          상위 폴더로 이동\n\n[표시/정보]\nAlt+Enter       속성\nF1              이 도움말\nCtrl+,          환경 설정\n\n[시작 시]\n지난 번에 열었던 폴더를 자동으로 복원합니다.\n\n[오른쪽 패널]\n미리보기와 정보 영역 경계를 드래그하여 크기 조절\n\n[FullViewer]\n←→↑↓ PgUp/Dn  이전/다음 이미지\nSpace / F11     몰입 모드 ON/OFF\nR               회전    +/-  확대/축소\n0               실제 크기    S    슬라이드쇼\nEsc/Enter       닫기    Delete  삭제\n'},
+    '\nサイズ: ': {"en": '\nSize: ', "zh": '\n大小：', "ko": '\n크기: '},
+    '\n保持する上限を MB で指定してください（古いものから削除されます）。': {"en": '\nEnter the limit to keep in MB (oldest files will be deleted first).', "zh": '\n请以 MB 指定要保留的上限（将从最旧的开始删除）。', "ko": '\n유지할 상한을 MB 단위로 지정하세요 (오래된 것부터 삭제됩니다).'},
+    '\n場所: ': {"en": '\nLocation: ', "zh": '\n位置：', "ko": '\n위치: '},
+    '\n変更先: ': {"en": '\nChange to: ', "zh": '\n更改为：', "ko": '\n변경 대상: '},
+    '\n旧形式 .pkl: ': {"en": '\nLegacy .pkl: ', "zh": '\n旧格式 .pkl：', "ko": '\n구형식 .pkl: '},
+    '\n更新日時: ': {"en": '\nModified: ', "zh": '\n更新时间：', "ko": '\n수정 일시: '},
+    '  |  使用: ': {"en": '  |  Used: ', "zh": '  |  使用：', "ko": '  |  사용: '},
+    '  |  最終: ': {"en": '  |  Last: ', "zh": '  |  最后：', "ko": '  |  최종: '},
+    '  ←→ナビ  Space=全画面': {"en": '  ←→ navigate  Space=fullscreen', "zh": '  ←→ 切换  Space=全屏', "ko": '  ←→ 탐색  Space=전체화면'},
+    '  中:': {"en": '  Medium:', "zh": '  中：', "ko": '  중:'},
+    '  低:': {"en": '  Low:', "zh": '  低：', "ko": '  하:'},
+    '  未:': {"en": '  N/A:', "zh": '  未：', "ko": '  미:'},
+    ' px\n作成日時: ': {"en": ' px\nCreated: ', "zh": ' px\n创建时间：', "ko": ' px\n생성 일시: '},
+    ' に移動しますか？': {"en": ' Move to?', "zh": ' 是否移动？', "ko": ' 로 이동하시겠습니까?'},
+    ' に移動しますか？\n\n': {"en": ' Move to?\n\n', "zh": ' 是否移动？\n\n', "ko": ' 로 이동하시겠습니까?\n\n'},
+    ' の保存に失敗: ': {"en": ' failed to save: ', "zh": ' 保存失败：', "ko": ' 저장 실패: '},
+    ' を ': {"en": ' ', "zh": ' ', "ko": '을(를) '},
+    ' バイト)\n画像サイズ: ': {"en": ' bytes)\nImage size: ', "zh": ' 字节）\n图片尺寸：', "ko": ' 바이트)\n이미지 크기: '},
+    ' ファイル': {"en": ' files', "zh": ' 个文件', "ko": ' 개 파일'},
+    ' ファイルを完全に削除します。\nこの操作は取り消せません。\n\n': {"en": ' Delete permanently.\nThis cannot be undone.\n\n', "zh": ' 彻底删除该文件。\n此操作无法撤销。\n\n', "ko": ' 파일을 완전히 삭제합니다.\n이 작업은 취소할 수 없습니다.\n\n'},
+    ' 件のサムネイルをバックグラウンドで生成しますか？\n※数万枚ある場合はディスクI/Oにより一時的に動作が重くなる場合があります。': {"en": ' thumbnails in the background?\n※ With tens of thousands of images, disk I/O may temporarily make the app sluggish.', "zh": ' 个缩略图？\n※ 如果有几万张图片，磁盘 I/O 可能会暂时使应用变慢。', "ko": ' 개의 썸네일을 백그라운드에서 생성할까요?\n※ 수만 장인 경우 디스크 I/O 때문에 일시적으로 동작이 느려질 수 있습니다.'},
+    ' 件選択': {"en": ' selected', "zh": ' 个已选', "ko": ' 개 선택'},
+    ' 枚': {"en": ' images', "zh": ' 张', "ko": ' 장'},
+    '"完全一致" / -除外語 は正規表現モード以外で有効': {"en": '"exact phrase" / -exclude terms are effective outside regex mode', "zh": '"完全一致" / -排除词 仅在非正则模式下有效', "ko": '"완전 일치" / -제외어는 정규식 모드 이외에서 유효합니다'},
+    '%)  |  作成日: ': {"en": '%)  |  Created: ', "zh": '%)  |  创建日期：', "ko": '%)  |  생성일: '},
+    '</b><br><br>PySide6 版 — tkinter 版 v11 を完全書き直し<br><br>依存: PySide6, Pillow': {"en": '</b><br><br>PySide6 version — complete rewrite of the tkinter version v11<br><br>Dependencies: PySide6, Pillow', "zh": '</b><br><br>PySide6 版 — 完全重写了 tkinter 版 v11<br><br>依赖：PySide6, Pillow', "ko": '</b><br><br>PySide6 버전 — tkinter 버전 v11을 완전히 재작성<br><br>의존성: PySide6, Pillow'},
+    'AI判定 ': {"en": 'AI assessment ', "zh": 'AI 判定 ', "ko": 'AI 판정 '},
+    'AI品質判定する画像がありません': {"en": 'No images to assess for AI quality', "zh": '没有需要 AI 品质判定的图片', "ko": 'AI 품질 판정할 이미지가 없습니다'},
+    'AI品質判定はすでに実行中です': {"en": 'AI quality assessment is already running', "zh": 'AI 品质判定已在运行中', "ko": 'AI 품질 판정이 이미 실행 중입니다'},
+    'AI画像評価': {"en": 'AI image rating', "zh": 'AI 图片评价', "ko": 'AI 이미지 평가'},
+    'AI画像評価が完了しました': {"en": 'AI image rating completed', "zh": 'AI 图片评价已完成', "ko": 'AI 이미지 평가가 완료되었습니다'},
+    'AI画像評価が完了しました。\n\nツール > AI画像評価 > 低だけ表示 から確認できます。': {"en": 'AI image rating completed.\n\nCheck via Tools > AI Image Rating > Show only low.', "zh": 'AI 图片评价已完成。\n\n可通过 工具 > AI 图片评价 > 仅显示低分 查看。', "ko": 'AI 이미지 평가가 완료되었습니다.\n\n도구 > AI 이미지 평가 > 낮음만 표시 에서 확인할 수 있습니다.'},
+    'AI画像評価をキャンセルしました': {"en": 'AI image rating cancelled', "zh": '已取消 AI 图片评价', "ko": 'AI 이미지 평가를 취소했습니다'},
+    'AI画像評価を開始: ': {"en": 'Starting AI image rating: ', "zh": '开始 AI 图片评价：', "ko": 'AI 이미지 평가 시작: '},
+    'AI画像評価エラー: ': {"en": 'AI image rating error: ', "zh": 'AI 图片评价错误：', "ko": 'AI 이미지 평가 오류: '},
+    'AI評価 ': {"en": 'AI rating ', "zh": 'AI 评价 ', "ko": 'AI 평가 '},
+    'AI評価の内容': {"en": 'AI rating details', "zh": 'AI 评价内容', "ko": 'AI 평가 내용'},
+    'AI評価キャッシュを再読込しました': {"en": 'Reloaded AI rating cache', "zh": '已重新加载 AI 评价缓存', "ko": 'AI 평가 캐시를 다시 불러왔습니다'},
+    'AI評価表示: ': {"en": 'AI rating display: ', "zh": 'AI 评价显示：', "ko": 'AI 평가 표시: '},
+    'AI速度: ': {"en": 'AI speed: ', "zh": 'AI 速度：', "ko": 'AI 속도: '},
+    'CFG scale の範囲。値が不明な画像は除外されます': {"en": 'CFG scale range. Images with unknown values are excluded.', "zh": 'CFG scale 范围。值未知的图片将被排除。', "ko": 'CFG scale 범위. 알 수 없는 값의 이미지는 제외됩니다'},
+    'CSVを出力しました:\n': {"en": 'CSV exported:\n', "zh": '已导出 CSV：\n', "ko": 'CSV 출력 완료:\n'},
+    'CSV出力': {"en": 'CSV export', "zh": 'CSV 导出', "ko": 'CSV 출력'},
+    'Civitaiで検索': {"en": 'Search on Civitai', "zh": '在 Civitai 上搜索', "ko": 'Civitai에서 검색'},
+    'F1 キーボードショートカット': {"en": 'F1 Keyboard shortcuts', "zh": 'F1 键盘快捷键', "ko": 'F1 키보드 단축키'},
+    'GB\n現行形式 .raw: ': {"en": 'GB\nCurrent .raw format: ', "zh": 'GB\n当前格式 .raw：', "ko": 'GB\n현재 형식 .raw: '},
+    'LoRAを選択すると詳細が表示されます': {"en": 'Select a LoRA to see details', "zh": '选择 LoRA 后将显示详情', "ko": 'LoRA를 선택하면 상세가 표시됩니다'},
+    'LoRAファイルと関連ファイル(.cm-info.json / .preview.jpeg)を削除します': {"en": 'Delete the LoRA file and related files (.cm-info.json / .preview.jpeg)', "zh": '将删除 LoRA 文件及相关文件（.cm-info.json / .preview.jpeg）', "ko": 'LoRA 파일 및 관련 파일(.cm-info.json / .preview.jpeg)을 삭제합니다'},
+    'LoRAフォルダ:': {"en": 'LoRA folder:', "zh": 'LoRA 文件夹：', "ko": 'LoRA 폴더:'},
+    'LoRAフォルダが設定されていません。\n今すぐ設定しますか？': {"en": 'LoRA folder is not set.\nSet it now?', "zh": '未设置 LoRA 文件夹。\n是否现在设置？', "ko": 'LoRA 폴더가 설정되지 않았습니다.\n지금 설정하시겠습니까?'},
+    'LoRAフォルダをスキャン中...': {"en": 'Scanning LoRA folder...', "zh": '正在扫描 LoRA 文件夹...', "ko": 'LoRA 폴더 스캔 중...'},
+    'LoRAフォルダを選択': {"en": 'Select LoRA folder', "zh": '选择 LoRA 文件夹', "ko": 'LoRA 폴더 선택'},
+    'LoRAフォルダ未設定': {"en": 'LoRA folder not set', "zh": '未设置 LoRA 文件夹', "ko": 'LoRA 폴더 미설정'},
+    'LoRA分析エラー': {"en": 'LoRA analysis error', "zh": 'LoRA 分析错误', "ko": 'LoRA 분석 오류'},
+    'LoRA名': {"en": 'LoRA name', "zh": 'LoRA 名称', "ko": 'LoRA 이름'},
+    'LoRA名で検索...': {"en": 'Search by LoRA name...', "zh": '按 LoRA 名称搜索...', "ko": 'LoRA 이름으로 검색...'},
+    'LoRA名をクリップボードにコピー': {"en": 'Copy LoRA name to clipboard', "zh": '将 LoRA 名称复制到剪贴板', "ko": 'LoRA 이름을 클립보드에 복사'},
+    'MB を削除しました。\n残り ': {"en": ' MB deleted.\nRemaining ', "zh": ' MB 已删除。\n剩余 ', "ko": ' MB 삭제됨.\n남은 '},
+    'MB を削除します。続行しますか？\n対応するサムネイルは次回表示時に再生成されます（画像本体は消えません）。\n旧形式 .pkl は再生成されず、そのまま不要になります。': {"en": ' MB will be deleted. Continue?\nRelated thumbnails will be regenerated next time they are displayed (the original images will not be deleted).\nLegacy .pkl will not be regenerated and will simply become obsolete.', "zh": ' MB 将被删除。是否继续？\n对应缩略图下次显示时将重新生成（原图不会被删除）。\n旧格式 .pkl 不会重新生成，也不再需要。', "ko": ' MB 를 삭제합니다. 계속하시겠습니까?\n해당 썸네일은 다음 표시 시 다시 생성됩니다 (이미지 원본은 삭제되지 않습니다).\n구형식 .pkl 은 재생성되지 않으며 그대로 불필요해집니다.'},
+    'MB 以下なので削除不要です。': {"en": ' MB or less, nothing to delete.', "zh": ' MB 以下，无需删除。', "ko": ' MB 이하이므로 삭제할 필요가 없습니다.'},
+    'MB（現行コードは読まない残骸）': {"en": ' MB (remnants not read by current code)', "zh": ' MB（当前代码不读取的残留）', "ko": ' MB (현재 코드가 읽지 않는 잔여물)'},
+    'MB（現行コードは読みません）': {"en": ' MB (not read by current code)', "zh": ' MB（当前代码不读取）', "ko": ' MB (현재 코드가 읽지 않음)'},
+    'PNGではありません': {"en": 'Not a PNG', "zh": '不是 PNG', "ko": 'PNG가 아닙니다'},
+    'Pillow が見つかりません。pip install Pillow を実行してください。': {"en": 'Pillow not found. Run: pip install Pillow', "zh": '未找到 Pillow。请执行 pip install Pillow', "ko": 'Pillow를 찾을 수 없습니다. pip install Pillow 를 실행하세요.'},
+    'Sampler 名の部分一致（大文字小文字無視）': {"en": 'Sampler name partial match (case-insensitive)', "zh": '采样器名称部分匹配（忽略大小写）', "ko": 'Sampler 이름 부분 일치 (대소문자 무시)'},
+    'Seed の部分一致': {"en": 'Seed partial match', "zh": '种子部分匹配', "ko": 'Seed 부분 일치'},
+    '[ファイル情報取得エラー: ': {"en": '[File info error: ', "zh": '[获取文件信息错误：', "ko": '[파일 정보 가져오기 오류: '},
+    '[メタ取得エラー: ': {"en": '[Metadata fetch error: ', "zh": '[获取元数据错误：', "ko": '[메타 가져오기 오류: '},
+    '[年月]': {"en": '[year/month]', "zh": '[年月]', "ko": '[년월]'},
+    '\\s*[日]': {"en": '\\s*[日]', "zh": '\\s*[日]', "ko": '\\s*[日]'},
+    'image_quality_sorter.py を読み込めませんでした:\n': {"en": 'Could not load image_quality_sorter.py:\n', "zh": '无法加载 image_quality_sorter.py：\n', "ko": 'image_quality_sorter.py 를 불러올 수 없습니다:\n'},
+    'raw 文字列': {"en": 'raw string', "zh": '原始字符串', "ko": 'raw 문자열'},
+    'settings.json の `thumb_cache_dir` 指定': {"en": '`thumb_cache_dir` in settings.json', "zh": 'settings.json 中的 `thumb_cache_dir` 指定', "ko": 'settings.json 의 `thumb_cache_dir` 지정'},
+    'thumb_mem=メモリヒット / thumb_disk=ディスクサムネ読込 / thumb_decode=デコード+縮小\npreview_mem/preview_load=右パネル等のプレビュー / fullview=全画面デコード': {"en": 'thumb_mem=memory hit / thumb_disk=disk thumbnail read / thumb_decode=decode+resize\npreview_mem/preview_load=right panel previews etc. / fullview=fullscreen decode', "zh": 'thumb_mem=内存命中 / thumb_disk=磁盘缩略图读取 / thumb_decode=解码+缩小\npreview_mem/preview_load=右侧面板等预览 / fullview=全屏解码', "ko": 'thumb_mem=메모리 히트 / thumb_disk=디스크 썸네일 읽기 / thumb_decode=디코드+리사이즈\npreview_mem/preview_load=오른쪽 패널 미리보기 등 / fullview=전체화면 디코드'},
+    'transformers が見つかりません。\n\npython -m pip install transformers': {"en": 'transformers not found.\n\npython -m pip install transformers', "zh": '未找到 transformers。\n\npython -m pip install transformers', "ko": 'transformers 를 찾을 수 없습니다.\n\npython -m pip install transformers'},
+    '※ LoRA名クリック時のCivitai検索と連携します': {"en": '※ Linked with Civitai search when clicking a LoRA name', "zh": '※ 点击 LoRA 名称时联动 Civitai 搜索', "ko": '※ LoRA 이름 클릭 시 Civitai 검색과 연동됩니다'},
+    '※ ロゴを登録したときはここに保存されます。\n※ 既定の保存先: ': {"en": '※ Registered logo images are saved here.\n※ Default location: ', "zh": '※ 注册的 Logo 图片将保存在这里。\n※ 默认保存位置：', "ko": '※ 등록한 로고는 여기에 저장됩니다.\n※ 기본 저장 위치: '},
+    '※列ヘッダーをクリックでソート': {"en": '※ Click column headers to sort', "zh": '※ 点击列标题可排序', "ko": '※ 열 헤더를 클릭하면 정렬합니다'},
+    'ℹ バージョン情報 ': {"en": 'ℹ Version info ', "zh": 'ℹ 版本信息 ', "ko": 'ℹ 버전 정보 '},
+    'ℹ プロパティ  Alt+Enter': {"en": 'ℹ Properties  Alt+Enter', "zh": 'ℹ 属性  Alt+Enter', "ko": 'ℹ 속성  Alt+Enter'},
+    '←→/Tab でボタン選択\u3000\u3000Enter/Y = はい\u3000\u3000N/Esc = いいえ': {"en": '←→/Tab to select button\u3000\u3000Enter/Y = Yes\u3000\u3000N/Esc = No', "zh": '←→/Tab 选择按钮\u3000\u3000Enter/Y = 是\u3000\u3000N/Esc = 否', "ko": '←→/Tab 으로 버튼 선택\u3000\u3000Enter/Y = 예\u3000\u3000N/Esc = 아니오'},
+    '↑昇順': {"en": '↑ Ascending', "zh": '↑ 升序', "ko": '↑ 오름차순'},
+    '↓降順': {"en": '↓ Descending', "zh": '↓ 降序', "ko": '↓ 내림차순'},
+    '↖ 左上': {"en": '↖ Top-left', "zh": '↖ 左上', "ko": '↖ 왼쪽 위'},
+    '↗ 右上': {"en": '↗ Top-right', "zh": '↗ 右上', "ko": '↗ 오른쪽 위'},
+    '↘ 右下': {"en": '↘ Bottom-right', "zh": '↘ 右下', "ko": '↘ 오른쪽 아래'},
+    '↙ 左下': {"en": '↙ Bottom-left', "zh": '↙ 左下', "ko": '↙ 왼쪽 아래'},
+    '⊞ 実寸': {"en": '⊞ Actual size', "zh": '⊞ 实际尺寸', "ko": '⊞ 실제 크기'},
+    '⊟ 原寸': {"en": '⊟ Original size', "zh": '⊟ 原始尺寸', "ko": '⊟ 원본 크기'},
+    '⊠ 戻す': {"en": '⊠ Reset', "zh": '⊠ 还原', "ko": '⊠ 되돌리기'},
+    '▌ 最初の画像です': {"en": '▌ This is the first image', "zh": '▌ 这是第一张图片', "ko": '▌ 첫 번째 이미지입니다'},
+    '▌ 最後の画像です': {"en": '▌ This is the last image', "zh": '▌ 这是最后一张图片', "ko": '▌ 마지막 이미지입니다'},
+    '▶ 次のフォルダ': {"en": '▶ Next folder', "zh": '▶ 下一文件夹', "ko": '▶ 다음 폴더'},
+    '◀ 前のフォルダ': {"en": '◀ Previous folder', "zh": '◀ 上一文件夹', "ko": '◀ 이전 폴더'},
+    '★ レーティング': {"en": '★ Rating', "zh": '★ 评分', "ko": '★ 평점'},
+    '★評価で絞り込み': {"en": '★ Filter by rating', "zh": '★ 按评分筛选', "ko": '★ 평점으로 필터링'},
+    '☐ このグループ解除': {"en": '☐ Uncheck this group', "zh": '☐ 取消此分组', "ko": '☐ 이 그룹 해제'},
+    '☐ すべて解除': {"en": '☐ Uncheck all', "zh": '☐ 全部取消', "ko": '☐ 모두 해제'},
+    '☐ 選択グループ解除': {"en": '☐ Uncheck selected groups', "zh": '☐ 取消所选分组', "ko": '☐ 선택 그룹 해제'},
+    '☑ このグループ': {"en": '☑ This group', "zh": '☑ 此分组', "ko": '☑ 이 그룹'},
+    '☑ 先頭以外を選択': {"en": '☑ Select all except the first', "zh": '☑ 选择除首项外全部', "ko": '☑ 첫 번째 제외 선택'},
+    '☑ 全選択': {"en": '☑ Select all', "zh": '☑ 全选', "ko": '☑ 전체 선택'},
+    '⚙ 環境設定': {"en": '⚙ Settings', "zh": '⚙ 环境设置', "ko": '⚙ 환경 설정'},
+    '⚙ 環境設定...': {"en": '⚙ Settings...', "zh": '⚙ 环境设置...', "ko": '⚙ 환경 설정...'},
+    '⚠ 完全削除': {"en": '⚠ Delete permanently', "zh": '⚠ 彻底删除', "ko": '⚠ 완전 삭제'},
+    '⚠ 完全削除  Shift+Delete': {"en": '⚠ Delete permanently  Shift+Delete', "zh": '⚠ 彻底删除  Shift+Delete', "ko": '⚠ 완전 삭제  Shift+Delete'},
+    '⚠ 日付': {"en": '⚠ Date', "zh": '⚠ 日期', "ko": '⚠ 날짜'},
+    '⚠ 正規表現が不正: ': {"en": '⚠ Invalid regex: ', "zh": '⚠ 正则表达式无效：', "ko": '⚠ 잘못된 정규식: '},
+    '⛶ 全画面': {"en": '⛶ Fullscreen', "zh": '⛶ 全屏', "ko": '⛶ 전체 화면'},
+    '✂ 切り取り': {"en": '✂ Cut', "zh": '✂ 剪切', "ko": '✂ 잘라내기'},
+    '✂ 切り取り  Ctrl+X': {"en": '✂ Cut  Ctrl+X', "zh": '✂ 剪切  Ctrl+X', "ko": '✂ 잘라내기  Ctrl+X'},
+    '✏ 名前の変更  F2': {"en": '✏ Rename  F2', "zh": '✏ 重命名  F2', "ko": '✏ 이름 변경  F2'},
+    '➕ 現在のフォルダをブックマーク': {"en": '➕ Bookmark current folder', "zh": '➕ 将当前文件夹加入书签', "ko": '➕ 현재 폴더를 북마크'},
+    '➕ 現在のフォルダを追加': {"en": '➕ Add current folder', "zh": '➕ 添加当前文件夹', "ko": '➕ 현재 폴더 추가'},
+    '➕ 追加': {"en": '➕ Add', "zh": '➕ 添加', "ko": '➕ 추가'},
+    '⭐ お気に入り': {"en": '⭐ Favorites', "zh": '⭐ 收藏', "ko": '⭐ 즐겨찾기'},
+    '⭐ お気に入りから削除': {"en": '⭐ Remove from favorites', "zh": '⭐ 从收藏中删除', "ko": '⭐ 즐겨찾기에서 삭제'},
+    '⭐ お気に入りに追加': {"en": '⭐ Add to favorites', "zh": '⭐ 添加到收藏', "ko": '⭐ 즐겨찾기에 추가'},
+    '⭐ ブックマーク': {"en": '⭐ Bookmarks', "zh": '⭐ 书签', "ko": '⭐ 북마크'},
+    '⭐ ブックマーク...': {"en": '⭐ Bookmarks...', "zh": '⭐ 书签...', "ko": '⭐ 북마크...'},
+    'いいえ(N)': {"en": 'No (N)', "zh": '否(N)', "ko": '아니오(N)'},
+    'お気に入り': {"en": 'Favorites', "zh": '收藏', "ko": '즐겨찾기'},
+    'お気に入りから削除: ': {"en": 'Remove from favorites: ', "zh": '从收藏中删除：', "ko": '즐겨찾기에서 삭제: '},
+    'お気に入りに追加: ': {"en": 'Add to favorites: ', "zh": '添加到收藏：', "ko": '즐겨찾기에 추가: '},
+    'が解釈できません: ': {"en": ' cannot be interpreted: ', "zh": ' 无法解析：', "ko": '을(를) 해석할 수 없습니다: '},
+    'このグループのファイルは見つかりません。': {"en": 'No files found in this group.', "zh": '此分组中未找到文件。', "ko": '이 그룹의 파일을 찾을 수 없습니다.'},
+    'このファイルを削除しますか？': {"en": 'Delete this file?', "zh": '删除此文件吗？', "ko": '이 파일을 삭제하시겠습니까?'},
+    'すべて': {"en": 'All', "zh": '全部', "ko": '모두'},
+    'すべて解除': {"en": 'Uncheck all', "zh": '全部取消', "ko": '모두 해제'},
+    'すべて選択': {"en": 'Select all', "zh": '全选', "ko": '전체 선택'},
+    'そのままコピー': {"en": 'Copy as is', "zh": '原样复制', "ko": '그대로 복사'},
+    'その他': {"en": 'Others', "zh": '其他', "ko": '기타'},
+    'なし': {"en": 'None', "zh": '无', "ko": '없음'},
+    'はい(Y)': {"en": 'Yes (Y)', "zh": '是(Y)', "ko": '예(Y)'},
+    'まだ計測データがありません。\n画像を表示・スクロールしてから開いてください。': {"en": 'No measurement data yet.\nDisplay/scroll through images first, then open again.', "zh": '暂无测量数据。\n请先显示/滚动图片，然后再打开。', "ko": '아직 측정 데이터가 없습니다.\n이미지를 표시하거나 스크롤한 뒤 다시 열어주세요.'},
+    'アクティビティログを表示/非表示': {"en": 'Show/hide activity log', "zh": '显示/隐藏活动日志', "ko": '활동 로그 표시/숨기기'},
+    'アプリケーション起動': {"en": 'Application started', "zh": '应用已启动', "ko": '애플리케이션 시작'},
+    'エラー': {"en": 'Error', "zh": '错误', "ko": '오류'},
+    'エラーメッセージをクリップボードにコピー': {"en": 'Copy error message to clipboard', "zh": '将错误消息复制到剪贴板', "ko": '오류 메시지를 클립보드에 복사'},
+    'オンで、カンマ区切りの全タグを含む画像だけ表示します': {"en": 'When on, shows only images containing all comma-separated tags', "zh": '开启时，仅显示包含所有以逗号分隔标签的图片', "ko": '켜면 쉼표로 구분된 모든 태그를 포함하는 이미지만 표시합니다'},
+    'カテゴリ': {"en": 'Category', "zh": '类别', "ko": '카테고리'},
+    'キャッシュ': {"en": 'Cache', "zh": '缓存', "ko": '캐시'},
+    'キャッシュフォルダを読めません: ': {"en": 'Cannot read cache folder: ', "zh": '无法读取缓存文件夹：', "ko": '캐시 폴더를 읽을 수 없습니다: '},
+    'キャッシュ利用': {"en": 'Cache usage', "zh": '缓存使用', "ko": '캐시 사용량'},
+    'キャッシュ整理中… ': {"en": 'Cleaning cache… ', "zh": '正在清理缓存… ', "ko": '캐시 정리 중… '},
+    'キャンセル': {"en": 'Cancel', "zh": '取消', "ko": '취소'},
+    'キーボードショートカット': {"en": 'Keyboard shortcuts', "zh": '键盘快捷键', "ko": '키보드 단축키'},
+    'クリックで拡張子設定を開く': {"en": 'Click to open extension settings', "zh": '点击打开扩展名设置', "ko": '클릭하여 확장자 설정 열기'},
+    'クリップボードにコピー': {"en": 'Copy to clipboard', "zh": '复制到剪贴板', "ko": '클립보드에 복사'},
+    'グループ': {"en": 'Group', "zh": '分组', "ko": '그룹'},
+    'グループ  |  削除チェック: ': {"en": 'Group  |  delete check: ', "zh": '分组  |  删除检查：', "ko": '그룹  |  삭제 체크: '},
+    'グループ  |  類似: ': {"en": 'Group  |  Similar: ', "zh": '分组  |  相似：', "ko": '그룹  |  유사: '},
+    'グループ / 削除候補': {"en": 'Group / deletion candidates', "zh": '分组 / 待删除项', "ko": '그룹 / 삭제 후보'},
+    'グループを検出': {"en": 'Detect groups', "zh": '检测分组', "ko": '그룹 감지'},
+    'ゴミ箱': {"en": 'Recycle Bin', "zh": '回收站', "ko": '휴지통'},
+    'サイズ': {"en": 'Size', "zh": '大小', "ko": '크기'},
+    'サブ': {"en": 'Sub', "zh": '子', "ko": '서브'},
+    'サブフォルダを含む': {"en": 'Include subfolders', "zh": '包含子文件夹', "ko": '하위 폴더 포함'},
+    'サムネイルキャッシュはまだありません。': {"en": 'No thumbnail cache yet.', "zh": '尚无缩略图缓存。', "ko": '아직 썸네일 캐시가 없습니다.'},
+    'サムネイルサイズ（60〜300px）\nグリッド上では Ctrl+ホイール でも変更できます': {"en": 'Thumbnail size (60〜300px)\nCan also be changed on the grid with Ctrl+Wheel', "zh": '缩略图大小（60〜300px）\n在网格上也可以用 Ctrl+滚轮更改', "ko": '썸네일 크기 (60〜300px)\n그리드에서 Ctrl+휠로도 변경할 수 있습니다'},
+    'サムネイル一括生成: ': {"en": 'Batch thumbnail generation: ', "zh": '批量生成缩略图：', "ko": '썸네일 일괄 생성: '},
+    'サムネイル一括生成を開始しました...': {"en": 'Started batch thumbnail generation...', "zh": '已开始批量生成缩略图...', "ko": '썸네일 일괄 생성을 시작했습니다...'},
+    'サムネキャッシュ': {"en": 'Thumbnail cache', "zh": '缩略图缓存', "ko": '썸네일 캐시'},
+    'サムネキャッシュを削除しました': {"en": 'Thumbnail cache deleted', "zh": '已删除缩略图缓存', "ko": '썸네일 캐시를 삭제했습니다'},
+    'サムネキャッシュ整理': {"en": 'Thumbnail cache cleanup', "zh": '缩略图缓存整理', "ko": '썸네일 캐시 정리'},
+    'サムネキャッシュ整理: 削除': {"en": 'Thumbnail cache cleanup: delete', "zh": '缩略图缓存整理：删除', "ko": '썸네일 캐시 정리: 삭제'},
+    'ショートカット一覧をコピーしました': {"en": 'Shortcut list copied', "zh": '已复制快捷键列表', "ko": '단축키 목록을 복사했습니다'},
+    'スキャン中...': {"en": 'Scanning...', "zh": '正在扫描...', "ko": '스캔 중...'},
+    'スキャン完了: ': {"en": 'Scan complete: ', "zh": '扫描完成：', "ko": '스캔 완료: '},
+    'スキャン完了。AI判定を開始します...': {"en": 'Scan complete. Starting AI assessment...', "zh": '扫描完成。开始 AI 判定...', "ko": '스캔 완료. AI 판정을 시작합니다...'},
+    'スキャン完了待ち... 完了後にAI判定を自動開始します': {"en": 'Waiting for scan to complete... AI assessment will start automatically when done.', "zh": '正在等待扫描完成... 完成后将自动开始 AI 判定', "ko": '스캔 완료 대기 중... 완료 후 AI 판정을 자동 시작합니다'},
+    'スライドショー (S)': {"en": 'Slideshow (S)', "zh": '幻灯片 (S)', "ko": '슬라이드쇼 (S)'},
+    'タグ (プロンプト/ネガ/LoRA)': {"en": 'Tags (prompt/negative/LoRA)', "zh": '标签 (提示词/负面/LoRA)', "ko": '태그 (프롬프트/네거티브/LoRA)'},
+    'タグ名（部分一致）:': {"en": 'Tag name (partial match):', "zh": '标签名（部分匹配）：', "ko": '태그 이름 (부분 일치):'},
+    'タグ追加': {"en": 'Add tag', "zh": '添加标签', "ko": '태그 추가'},
+    'タグ（プロンプト・ネガ・LoRA名）とファイル名を検索します。\n-語 で除外、"語" で完全一致フレーズ。\n検索範囲や正規表現・範囲指定は「詳細」ボタンから。': {"en": 'Searches tags (prompt/negative/LoRA names) and file names.\n-term to exclude, "term" for exact phrase.\nSearch scope, regex and ranges are in the "Details" panel.', "zh": '搜索标签（提示词・负面・LoRA 名称）和文件名。\n-词 可排除，"词" 为完全一致短语。\n搜索范围、正则表达式和范围指定请点击「详细」按钮。', "ko": '태그(프롬프트·네거티브·LoRA 이름)와 파일 이름을 검색합니다.\n-어 로 제외, "어" 로 완전 일치 구문.\n검색 범위, 정규식, 범위 지정은 「상세」 버튼에서.'},
+    'タグ（部分一致）': {"en": 'Tag (partial match)', "zh": '标签（部分匹配）', "ko": '태그 (부분 일치)'},
+    'ダブルクリック → 絞り込み': {"en": 'Double-click → filter', "zh": '双击 → 筛选', "ko": '더블 클릭 → 필터링'},
+    'ダブルクリックで全コンテンツが見える高さに展開': {"en": 'Double-click to expand to the height of all content', "zh": '双击展开到可容纳全部内容的高度', "ko": '더블 클릭하면 모든 콘텐츠가 보이는 높이로 확장'},
+    'ダブルクリックまたは「開く」でフォルダを読み込み  |  右クリックで削除': {"en": 'Double-click or "Open" to load folder  |  Right-click to delete', "zh": '双击或「打开」加载文件夹  |  右键删除', "ko": '더블 클릭 또는 「열기」로 폴더 불러오기  |  우클릭으로 삭제'},
+    'チェックされているLoRAがありません。': {"en": 'No LoRA checked.', "zh": '没有已勾选的 LoRA。', "ko": '체크된 LoRA가 없습니다.'},
+    'チェックポイントの系統で絞り込み': {"en": 'Filter by checkpoint family', "zh": '按 Checkpoint 系列筛选', "ko": '체크포인트 계통으로 필터링'},
+    'チェックポイント名で絞り込み': {"en": 'Filter by checkpoint name', "zh": '按 Checkpoint 名称筛选', "ko": '체크포인트 이름으로 필터링'},
+    'ツール(&T)': {"en": 'Tools(&T)', "zh": '工具(&T)', "ko": '도구(&T)'},
+    'バージョン情報': {"en": 'About', "zh": '版本信息', "ko": '버전 정보'},
+    'パスをコピーしました: ': {"en": 'Path copied: ', "zh": '已复制路径：', "ko": '경로를 복사했습니다: '},
+    'パネル幅の設定': {"en": 'Panel width settings', "zh": '面板宽度设置', "ko": '패널 너비 설정'},
+    'ファイル / ': {"en": 'File / ', "zh": '文件 / ', "ko": '파일 / '},
+    'ファイル(&F)': {"en": 'File(&F)', "zh": '文件(&F)', "ko": '파일(&F)'},
+    'ファイルが見つかりません: ': {"en": 'File not found: ', "zh": '未找到文件：', "ko": '파일을 찾을 수 없습니다: '},
+    'ファイルの更新日時 (mtime) 基準\n入力可: 2026-01-05 / 2026/1/5 / 20260105 / 2026-01（月）/ 2026（年）': {"en": 'File modification time (mtime) basis\nAccepts: 2026-01-05 / 2026/1/5 / 20260105 / 2026-01 (month) / 2026 (year)', "zh": '文件更新时间 (mtime) 基准\n可输入：2026-01-05 / 2026/1/5 / 20260105 / 2026-01（月）/ 2026（年）', "ko": '파일 수정 일시(mtime) 기준\n입력 가능: 2026-01-05 / 2026/1/5 / 20260105 / 2026-01(월) / 2026(년)'},
+    'ファイルを削除しました': {"en": 'File deleted', "zh": '已删除文件', "ko": '파일을 삭제했습니다'},
+    'ファイルサイズ': {"en": 'File size', "zh": '文件大小', "ko": '파일 크기'},
+    'ファイルサイズ(MB) の範囲': {"en": 'File size (MB) range', "zh": '文件大小（MB）范围', "ko": '파일 크기(MB) 범위'},
+    'ファイルパス': {"en": 'File path', "zh": '文件路径', "ko": '파일 경로'},
+    'ファイル名': {"en": 'File name', "zh": '文件名', "ko": '파일 이름'},
+    'ファイル名: ': {"en": 'File name: ', "zh": '文件名：', "ko": '파일 이름: '},
+    'ファイル情報・メタ': {"en": 'File info / meta', "zh": '文件信息・元数据', "ko": '파일 정보·메타'},
+    'フォルダが見つかりません:\n': {"en": 'Folder not found:\n', "zh": '未找到文件夹：\n', "ko": '폴더를 찾을 수 없습니다:\n'},
+    'フォルダが見つかりません: ': {"en": 'Folder not found: ', "zh": '未找到文件夹：', "ko": '폴더를 찾을 수 없습니다: '},
+    'フォルダを作成しました: ': {"en": 'Folder created: ', "zh": '已创建文件夹：', "ko": '폴더를 만들었습니다: '},
+    'フォルダを選択': {"en": 'Select folder', "zh": '选择文件夹', "ko": '폴더 선택'},
+    'フォルダを開けません': {"en": 'Cannot open folder', "zh": '无法打开文件夹', "ko": '폴더를 열 수 없습니다'},
+    'フォルダパスを入力して Enter': {"en": 'Enter path and press Enter', "zh": '输入文件夹路径后按 Enter', "ko": '폴더 경로를 입력하고 Enter'},
+    'フォルダパネルを開閉': {"en": 'Toggle folder panel', "zh": '切换文件夹面板', "ko": '폴더 패널 열기/닫기'},
+    'フォルダー': {"en": 'Folder', "zh": '文件夹', "ko": '폴더'},
+    'フォルダ名:': {"en": 'Folder name:', "zh": '文件夹名：', "ko": '폴더 이름:'},
+    'フォルダ読込完了: ': {"en": 'Folder loaded: ', "zh": '文件夹读取完成：', "ko": '폴더 불러오기 완료: '},
+    'ブックマークに追加: ': {"en": 'Add to bookmarks: ', "zh": '添加到书签：', "ko": '북마크에 추가: '},
+    'プレビュー': {"en": 'Preview', "zh": '预览', "ko": '미리보기'},
+    'プロパティ': {"en": 'Properties', "zh": '属性', "ko": '속성'},
+    'プロパティをコピーしました': {"en": 'Properties copied', "zh": '已复制属性', "ko": '속성을 복사했습니다'},
+    'プロンプトに指定したタグが含まれる画像に自動でロゴを適用します。\n手動でロゴを設定済みの画像には自動適用されません。': {"en": 'Automatically applies a logo to images whose prompt contains the specified tag.\nImages with a manually set logo are not auto-applied.', "zh": '提示词中包含指定标签的图片将自动应用 Logo。\n已手动设置 Logo 的图片不会自动应用。', "ko": '프롬프트에 지정한 태그가 포함된 이미지에 로고를 자동 적용합니다.\n직접 로고를 설정한 이미지에는 자동 적용되지 않습니다.'},
+    'ヘルプ(&H)': {"en": 'Help(&H)', "zh": '帮助(&H)', "ko": '도움말(&H)'},
+    'メイン': {"en": 'Main', "zh": '主要', "ko": '메인'},
+    'メタキャッシュの保存に失敗: ': {"en": 'Failed to save meta cache: ', "zh": '元数据缓存保存失败：', "ko": '메타 캐시 저장 실패: '},
+    'メタキャッシュの読み込みに失敗: ': {"en": 'Failed to read meta cache: ', "zh": '元数据缓存读取失败：', "ko": '메타 캐시 불러오기 실패: '},
+    'メタキャッシュを JSON 形式へ移行しました': {"en": 'Migrated meta cache to JSON format', "zh": '已将元数据缓存迁移为 JSON 格式', "ko": '메타 캐시를 JSON 형식으로 마이그레이션했습니다'},
+    'メタキャッシュをクリアしました': {"en": 'Meta cache cleared', "zh": '已清除元数据缓存', "ko": '메타 캐시를 지웠습니다'},
+    'メタデータキャッシュを削除しますか？\n次回起動時の読み込みが遅くなります。': {"en": 'Delete metadata cache?\nNext startup will be slower to load.', "zh": '删除元数据缓存吗？\n下次启动时读取会变慢。', "ko": '메타데이터 캐시를 삭제하시겠습니까?\n다음 시작 시 불러오기가 느려집니다.'},
+    'メタデータ先読み完了': {"en": 'Metadata preload complete', "zh": '元数据预读取完成', "ko": '메타데이터 사전 로드 완료'},
+    'メタ情報': {"en": 'Metadata', "zh": '元数据', "ko": '메타 정보'},
+    'メタ読込 ': {"en": 'Metadata read ', "zh": '元数据读取 ', "ko": '메타 읽기 '},
+    'メタ読込完了': {"en": 'Metadata read complete', "zh": '元数据读取完成', "ko": '메타 읽기 완료'},
+    'モデル': {"en": 'Model', "zh": '模型', "ko": '모델'},
+    'モデル名': {"en": 'Model name', "zh": '模型名称', "ko": '모델 이름'},
+    'ランダム': {"en": 'Random', "zh": '随机', "ko": '랜덤'},
+    'リセット': {"en": 'Reset', "zh": '重置', "ko": '리셋'},
+    'ループ（最初/最後に戻る）': {"en": 'Loop (back to first/last)', "zh": '循环（回到开头/末尾）', "ko": '반복 (처음/마지막으로 돌아가기)'},
+    'ロゴ': {"en": 'Logo', "zh": 'Logo', "ko": '로고'},
+    'ロゴPNG を選択': {"en": 'Select logo PNG', "zh": '选择 Logo PNG', "ko": '로고 PNG 선택'},
+    'ロゴの保存先が変更されました。\n\n現在: ': {"en": 'The logo save location has changed.\n\nCurrent: ', "zh": 'Logo 保存位置已更改。\n\n当前：', "ko": '로고 저장 위치가 변경되었습니다.\n\n현재: '},
+    'ロゴを置く位置を選択してください': {"en": 'Choose where to place the logo', "zh": '请选择 Logo 的位置', "ko": '로고를 배치할 위치를 선택하세요'},
+    'ロゴ保存先:': {"en": 'Logo save folder:', "zh": 'Logo 保存位置：', "ko": '로고 저장 위치:'},
+    'ロゴ保存先の変更': {"en": 'Change logo save folder', "zh": '更改 Logo 保存位置', "ko": '로고 저장 위치 변경'},
+    'ロゴ保存先を選択': {"en": 'Select logo save folder', "zh": '选择 Logo 保存位置', "ko": '로고 저장 위치 선택'},
+    'ロゴ画像:': {"en": 'Logo image:', "zh": 'Logo 图片：', "ko": '로고 이미지:'},
+    'ロゴ画像が指定されていません': {"en": 'No logo image specified', "zh": '未指定 Logo 图片', "ko": '로고 이미지가 지정되지 않았습니다'},
+    'ロゴ画像が見つかりません: ': {"en": 'Logo image not found: ', "zh": '未找到 Logo 图片：', "ko": '로고 이미지를 찾을 수 없습니다: '},
+    'ロゴ画像を選択': {"en": 'Select logo image', "zh": '选择 Logo 图片', "ko": '로고 이미지 선택'},
+    'ロゴ画像パス': {"en": 'Logo image path', "zh": 'Logo 图片路径', "ko": '로고 이미지 경로'},
+    'ロゴ登録エラー': {"en": 'Logo registration error', "zh": 'Logo 注册错误', "ko": '로고 등록 오류'},
+    'ロゴ調整エラー': {"en": 'Logo adjustment error', "zh": 'Logo 调整错误', "ko": '로고 조정 오류'},
+    'ロゴ調整保存エラー': {"en": 'Logo adjustment save error', "zh": 'Logo 调整保存错误', "ko": '로고 조정 저장 오류'},
+    'ロゴ配置': {"en": 'Logo placement', "zh": 'Logo 位置', "ko": '로고 배치'},
+    'ロード統計': {"en": 'Load stats', "zh": '加载统计', "ko": '로드 통계'},
+    'ロード統計をリセットしました': {"en": 'Load stats reset', "zh": '已重置加载统计', "ko": '로드 통계를 리셋했습니다'},
+    '一括削除: ': {"en": 'Batch delete: ', "zh": '批量删除：', "ko": '일괄 삭제: '},
+    '一部のファイルを削除できませんでした:\n': {"en": 'Some files could not be deleted:\n', "zh": '部分文件无法删除：\n', "ko": '일부 파일을 삭제할 수 없습니다:\n'},
+    '上': {"en": 'Top', "zh": '上', "ko": '위'},
+    '上部プレビュー\n上部に大プレビュー、下部にサムネ帯': {"en": 'Top preview\nLarge preview on top, thumbnail strip below', "zh": '顶部预览\n顶部大预览，底部缩略图条', "ko": '상단 미리보기\n상단에 큰 미리보기, 하단에 썸네일 띠'},
+    '上限 ': {"en": 'Limit ', "zh": '上限 ', "ko": '상한 '},
+    '不明なエラー': {"en": 'Unknown error', "zh": '未知错误', "ko": '알 수 없는 오류'},
+    '並び替えの基準': {"en": 'Sort basis', "zh": '排序依据', "ko": '정렬 기준'},
+    '中': {"en": 'Medium', "zh": '中', "ko": '중'},
+    '以下の ': {"en": 'The following ', "zh": '以下 ', "ko": '다음 '},
+    '件': {"en": ' items', "zh": ' 件', "ko": ' 개'},
+    '件  /  画像 ': {"en": ' items  /  images ', "zh": ' 件  /  图片 ', "ko": ' 개  /  이미지 '},
+    '件  |  完全一致: ': {"en": ' items  |  Exact: ', "zh": ' 件  |  完全一致：', "ko": ' 개  |  완전 일치: '},
+    '件  |  未使用 ': {"en": ' items  |  Unused ', "zh": ' 件  |  未使用 ', "ko": ' 개  |  미사용 '},
+    '件  |  選択中グループ: ': {"en": ' items  |  Selected group: ', "zh": ' 件  |  所选分组：', "ko": ' 개  |  선택 그룹: '},
+    '件  — Esc で解除': {"en": ' items  — Esc to clear', "zh": ' 件  — Esc 取消', "ko": ' 개  — Esc 로 해제'},
+    '件 (': {"en": ' items (', "zh": ' 件（', "ko": ' 개 ('},
+    '件 / ': {"en": ' items / ', "zh": ' 件 / ', "ko": ' 개 / '},
+    '件 / 全': {"en": ' items / all', "zh": ' 件 / 全部', "ko": ' 개 / 전부'},
+    '件 / 残り': {"en": ' items / remaining', "zh": ' 件 / 剩余', "ko": ' 개 / 남음'},
+    '件)': {"en": ' items)', "zh": ' 件）', "ko": ' 개)'},
+    '件にロゴを設定しました': {"en": ' items had logo applied', "zh": ' 个已应用 Logo', "ko": ' 개에 로고를 설정했습니다'},
+    '件のパスをコピーしました': {"en": ' items copied', "zh": ' 个路径已复制', "ko": ' 개의 경로를 복사했습니다'},
+    '件のファイルを ': {"en": ' files ', "zh": ' 个文件', "ko": ' 개의 파일을 '},
+    '件のロゴ設定を削除しました': {"en": ' logo settings deleted', "zh": ' 个 Logo 设置已删除', "ko": ' 개의 로고 설정을 삭제했습니다'},
+    '件をキューに投入しました': {"en": ' items queued', "zh": ' 个任务已加入队列', "ko": ' 개를 큐에 넣었습니다'},
+    '件をクリップボードにコピーしました': {"en": ' items copied to clipboard', "zh": ' 个已复制到剪贴板', "ko": ' 개를 클립보드에 복사했습니다'},
+    '件を出力しました': {"en": ' items exported', "zh": ' 个已导出', "ko": ' 개를 출력했습니다'},
+    '件を切り取りました': {"en": ' items cut', "zh": ' 个已剪切', "ko": ' 개를 잘라냈습니다'},
+    '件を貼り付けました': {"en": ' items pasted', "zh": ' 个已粘贴', "ko": ' 개를 붙여넣었습니다'},
+    '件削除': {"en": ' items deleted', "zh": ' 个已删除', "ko": ' 개 삭제'},
+    '件数': {"en": 'Item count', "zh": '数量', "ko": '개수'},
+    '低': {"en": 'Low', "zh": '低', "ko": '하'},
+    '作成日': {"en": 'Created', "zh": '创建日期', "ko": '생성일'},
+    '作成日時': {"en": 'Created at', "zh": '创建时间', "ko": '생성 일시'},
+    '使用枚数': {"en": 'Images used', "zh": '使用数量', "ko": '사용 장수'},
+    '使用率': {"en": 'Usage rate', "zh": '使用率', "ko": '사용률'},
+    '使用率(%)': {"en": 'Usage rate (%)', "zh": '使用率(%)', "ko": '사용률(%)'},
+    '例: DPM++ 2M': {"en": 'e.g. DPM++ 2M', "zh": '例：DPM++ 2M', "ko": '예: DPM++ 2M'},
+    '保存して閉じる': {"en": 'Save and close', "zh": '保存并关闭', "ko": '저장하고 닫기'},
+    '保存に失敗しました': {"en": 'Failed to save', "zh": '保存失败', "ko": '저장에 실패했습니다'},
+    '保存エラー': {"en": 'Save error', "zh": '保存错误', "ko": '저장 오류'},
+    '保存先: ': {"en": 'Save to: ', "zh": '保存位置：', "ko": '저장 위치: '},
+    '保存先のファイル名が多すぎます: ': {"en": 'Too many filenames in save location: ', "zh": '保存位置的文件名过多：', "ko": '저장 위치의 파일 이름이 너무 많습니다: '},
+    '保持': {"en": 'Keep', "zh": '保留', "ko": '유지'},
+    '個を削除）': {"en": ' delete)', "zh": ' 个删除）', "ko": ' 개 삭제)'},
+    '全': {"en": 'All', "zh": '全部', "ko": '전체'},
+    '全て': {"en": 'All', "zh": '全部', "ko": '전체'},
+    '全キャッシュ': {"en": 'All cache', "zh": '全部缓存', "ko": '전체 캐시'},
+    '全サムネイル生成': {"en": 'Generate all thumbnails', "zh": '生成全部缩略图', "ko": '전체 썸네일 생성'},
+    '全条件を解除': {"en": 'Clear all conditions', "zh": '清除全部条件', "ko": '모든 조건 해제'},
+    '全画面\nグリッド全画面': {"en": 'Fullscreen\nGrid fullscreen', "zh": '全屏\n网格全屏', "ko": '전체 화면\n그리드 전체 화면'},
+    '全選択': {"en": 'Select all', "zh": '全选', "ko": '전체 선택'},
+    '再判定': {"en": 'Re-evaluate', "zh": '重新判定', "ko": '재판정'},
+    '再集計': {"en": 'Re-aggregate', "zh": '重新统计', "ko": '재집계'},
+    '出力エラー': {"en": 'Export error', "zh": '导出错误', "ko": '출력 오류'},
+    '出力フォルダを選択': {"en": 'Select output folder', "zh": '选择输出文件夹', "ko": '출력 폴더 선택'},
+    '分析中...': {"en": 'Analyzing...', "zh": '正在分析...', "ko": '분석 중...'},
+    '削除': {"en": 'Delete', "zh": '删除', "ko": '삭제'},
+    '削除: ': {"en": 'Delete: ', "zh": '删除：', "ko": '삭제: '},
+    '削除しました': {"en": 'Deleted', "zh": '已删除', "ko": '삭제했습니다'},
+    '削除する画像を選択してください': {"en": 'Select images to delete', "zh": '请选择要删除的图片', "ko": '삭제할 이미지를 선택하세요'},
+    '削除の確認': {"en": 'Confirm deletion', "zh": '确认删除', "ko": '삭제 확인'},
+    '削除エラー': {"en": 'Delete error', "zh": '删除错误', "ko": '삭제 오류'},
+    '削除対象にチェックがありません。': {"en": 'No delete target is checked.', "zh": '未勾选待删除项。', "ko": '삭제 대상이 체크되어 있지 않습니다.'},
+    '削除対象のファイルが見つかりません。': {"en": 'Delete target files not found.', "zh": '未找到待删除的文件。', "ko": '삭제 대상 파일을 찾을 수 없습니다.'},
+    '削除対象の品質画像がありません': {"en": 'No quality images to delete', "zh": '没有待删除的品质图片', "ko": '삭제 대상 품질 이미지가 없습니다'},
+    '削除確認': {"en": 'Confirm deletion', "zh": '确认删除', "ko": '삭제 확인'},
+    '削除確認 (': {"en": 'Confirm deletion (', "zh": '确认删除（', "ko": '삭제 확인 ('},
+    '前のフォルダはありません': {"en": 'No previous folder', "zh": '没有上一文件夹', "ko": '이전 폴더가 없습니다'},
+    '前回の重複検出結果を表示: ': {"en": 'Show previous duplicate detection results: ', "zh": '显示上次重复检测结果：', "ko": '이전 중복 검출 결과 표시: '},
+    '参照...': {"en": 'Browse...', "zh": '浏览...', "ko": '찾아보기...'},
+    '右': {"en": 'Right', "zh": '右', "ko": '오른쪽'},
+    '右カラムを開閉': {"en": 'Toggle right column', "zh": '切换右栏', "ko": '오른쪽 열 열기/닫기'},
+    '右パネル幅 (px):': {"en": 'Right panel width (px):', "zh": '右面板宽度 (px)：', "ko": '오른쪽 패널 너비 (px):'},
+    '右パネル（デフォルト）\nグリッド右にプレビュー＋メタ情報': {"en": 'Right panel (default)\nPreview + metadata right of grid', "zh": '右侧面板（默认）\n网格右侧显示预览 + 元数据', "ko": '오른쪽 패널 (기본)\n그리드 오른쪽에 미리보기 + 메타 정보'},
+    '各グループの先頭は既定で保持、2件目以降が削除チェック済みです。カードをクリックすると対象グループを選択、ダブルクリックまたはグループ表示ボタンで比較グリッドへ移動します。': {"en": 'By default the first item of each group is kept and the rest are checked for deletion. Click a card to select its group; double-click or use the group display button to jump to the comparison grid.', "zh": '每个分组的首项默认保留，第 2 项起已勾选删除。点击卡片可选择对应分组，双击或点击分组显示按钮可跳转到对比网格。', "ko": '각 그룹의 첫 번째는 기본 유지되며 2번째부터 삭제 체크됩니다. 카드를 클릭하면 해당 그룹을 선택하고, 더블 클릭 또는 그룹 표시 버튼을 누르면 비교 그리드로 이동합니다.'},
+    '合成画像を保存': {"en": 'Save composed image', "zh": '保存合成图片', "ko": '합성 이미지 저장'},
+    '名前': {"en": 'Name', "zh": '名称', "ko": '이름'},
+    '名前の変更': {"en": 'Rename', "zh": '重命名', "ko": '이름 변경'},
+    '名前変更: ': {"en": 'Rename: ', "zh": '重命名：', "ko": '이름 변경: '},
+    '四隅余白': {"en": 'Corner margins', "zh": '四角边距', "ko": '네 모서리 여백'},
+    '回転 (R)': {"en": 'Rotate (R)', "zh": '旋转 (R)', "ko": '회전 (R)'},
+    '完了': {"en": 'Done', "zh": '完成', "ko": '완료'},
+    '完全一致': {"en": 'Exact match', "zh": '完全一致', "ko": '완전 일치'},
+    '完全削除': {"en": 'Delete permanently', "zh": '彻底删除', "ko": '완전 삭제'},
+    '実寸': {"en": 'Actual size', "zh": '实际尺寸', "ko": '실제 크기'},
+    '実寸/fitモード切替': {"en": 'Toggle actual/fit mode', "zh": '实际尺寸/适应切换', "ko": '실제 크기/fit 모드 전환'},
+    '小': {"en": 'Small', "zh": '小', "ko": '작게'},
+    '履歴はまだありません。\n検索欄で Enter、または\n検索欄からフォーカスを\n外すと残ります。': {"en": 'No history yet.\nPress Enter in the search box, or\nmove focus away from the\nsearch box to save.', "zh": '暂无历史记录。\n在搜索框中按 Enter，\n或让搜索框失去焦点时\n会自动保存。', "ko": '아직 기록이 없습니다.\n검색란에서 Enter를 누르거나\n검색란에서 포커스를\n벗어나면 남습니다.'},
+    '履歴をクリア': {"en": 'Clear history', "zh": '清除历史', "ko": '기록 지우기'},
+    '左': {"en": 'Left', "zh": '左', "ko": '왼쪽'},
+    '左パネル幅 (px):': {"en": 'Left panel width (px):', "zh": '左面板宽度 (px)：', "ko": '왼쪽 패널 너비 (px):'},
+    '左右分割・プレビュー右\n左にグリッド、右に大プレビュー': {"en": 'Split preview right\nGrid left, large preview right', "zh": '左右分割·预览右\n左侧网格，右侧大预览', "ko": '좌우 분할·미리보기 오른쪽\n왼쪽 그리드, 오른쪽 큰 미리보기'},
+    '左右分割・プレビュー左\n左に大プレビュー、右にグリッド': {"en": 'Split preview left\nLarge preview left, grid right', "zh": '左右分割·预览左\n左侧大预览，右侧网格', "ko": '좌우 분할·미리보기 왼쪽\n왼쪽 큰 미리보기, 오른쪽 그리드'},
+    '平均 ms': {"en": 'Avg ms', "zh": '平均 ms', "ko": '평균 ms'},
+    '年/月/日・年-月・年のみの入力も正規化して受け付けます': {"en": 'Accepts year/month/day, year-month, and year-only input normalized', "zh": '接受 年/月/日·年-月·仅年份 输入并规范化', "ko": '년/월/일·년-월·년만 입력해도 정규화하여 처리합니다'},
+    '年/月/日・年-月・年のみの入力も正規化して受け付けます（月・年のみは最終日に展開）': {"en": 'Accepts year/month/day, year-month, and year-only input normalized (month-only and year-only expand to the last day)', "zh": '接受 年/月/日·年-月·仅年份 输入并规范化（仅月/仅年时展开为月末/年末）', "ko": '년/월/일·년-월·년만 입력해도 정규화하여 처리합니다 (월만/년만은 말일로 펼칩니다)'},
+    '手動位置': {"en": 'Manual position', "zh": '手动位置', "ko": '수동 위치'},
+    '手動配置': {"en": 'Manual placement', "zh": '手动放置', "ko": '수동 배치'},
+    '拡大 (+)': {"en": 'Zoom in (+)', "zh": '放大 (+)', "ko": '확대 (+)'},
+    '拡張子': {"en": 'Ext', "zh": '扩展名', "ko": '확장자'},
+    '拡張子:': {"en": 'Ext:', "zh": '扩展名：', "ko": '확장자:'},
+    '拡張子:なし': {"en": 'Ext: none', "zh": '扩展名：无', "ko": '확장자: 없음'},
+    '拡張子:全て': {"en": 'Ext: all', "zh": '扩展名：全部', "ko": '확장자: 전체'},
+    '指定なし': {"en": 'Not set', "zh": '未指定', "ko": '지정 없음'},
+    '整理': {"en": 'Organize', "zh": '整理', "ko": '정리'},
+    '新しいファイル名:': {"en": 'New file name:', "zh": '新文件名：', "ko": '새 파일 이름:'},
+    '新しいフォルダ': {"en": 'New folder', "zh": '新建文件夹', "ko": '새 폴더'},
+    '既定（LOCALAPPDATA）': {"en": 'Default (LOCALAPPDATA)', "zh": '默认（LOCALAPPDATA）', "ko": '기본값 (LOCALAPPDATA)'},
+    '日付': {"en": 'Date', "zh": '日期', "ko": '날짜'},
+    '日時': {"en": 'Date/time', "zh": '日期时间', "ko": '일시'},
+    '旧メタキャッシュの移行に失敗: ': {"en": 'Failed to migrate old meta cache: ', "zh": '旧元数据缓存迁移失败：', "ko": '구 메타 캐시 마이그레이션 실패: '},
+    '昇順/降順を切り替え': {"en": 'Toggle ascending/descending', "zh": '切换升序/降序', "ko": '오름/내림차순 전환'},
+    '更新日時': {"en": 'Modified', "zh": '更新时间', "ko": '수정 일시'},
+    '最大': {"en": 'Max', "zh": '最大', "ko": '최대'},
+    '最大 ms': {"en": 'Max ms', "zh": '最大 ms', "ko": '최대 ms'},
+    '最大化 / 元に戻す': {"en": 'Maximize / restore', "zh": '最大化 / 还原', "ko": '최대화 / 복원'},
+    '最終使用日': {"en": 'Last used', "zh": '最后使用日期', "ko": '최종 사용일'},
+    '未': {"en": 'N/A', "zh": '未', "ko": '미'},
+    '未使用のみ': {"en": 'Unused only', "zh": '仅未使用', "ko": '미사용만'},
+    '未判定': {"en": 'Not evaluated', "zh": '未判定', "ko": '미판정'},
+    '未評価': {"en": 'Not rated', "zh": '未评价', "ko": '미평가'},
+    '枚': {"en": ' images', "zh": ' 张', "ko": ' 장'},
+    '枚  ': {"en": ' images  ', "zh": ' 张  ', "ko": ' 장  '},
+    '枚 (': {"en": ' images (', "zh": ' 张（', "ko": ' 장 ('},
+    '枚 (重複グループ)': {"en": ' images (duplicates)', "zh": ' 张（重复分组）', "ko": ' 장 (중복 그룹)'},
+    '枚 (類似': {"en": ' images (similar ', "zh": ' 张（相似', "ko": ' 장 (유사'},
+    '枚)': {"en": ' images)', "zh": ' 张）', "ko": ' 장)'},
+    '枚あります。初回サムネ生成に時間がかかります': {"en": ' images found. First-time thumbnail generation will take some time.', "zh": ' 张。首次缩略图生成需要一些时间', "ko": ' 장입니다. 최초 썸네일 생성에 시간이 걸립니다'},
+    '枚でスキャン完了  (未使用 ': {"en": ' images scanned  (unused ', "zh": ' 张扫描完成  （未使用 ', "ko": ' 장으로 스캔 완료  (미사용 '},
+    '枚選択中': {"en": ' images selected', "zh": ' 张已选中', "ko": ' 장 선택 중'},
+    '検査: ': {"en": 'Inspection: ', "zh": '检查：', "ko": '검사: '},
+    '検索: タグ / ファイル名 / -除外 / "完全一致"': {"en": 'Search: tags / file name / -exclude / "exact"', "zh": '搜索：标签 / 文件名 / -排除 / "完全一致"', "ko": '검색: 태그 / 파일 이름 / -제외 / "완전 일치"'},
+    '検索バーの入力を正規表現として扱います。\n不正な式の場合は警告を表示し、通常の部分一致検索にフォールバックします。': {"en": 'Treats the search bar input as a regular expression.\nIf the expression is invalid, shows a warning and falls back to normal partial matching.', "zh": '将搜索栏输入作为正则表达式处理。\n如果表达式无效，将显示警告并回退为普通部分匹配搜索。', "ko": '검색 바 입력을 정규식으로 처리합니다.\n잘못된 식이면 경고를 표시하고 일반 부분 일치 검색으로 돌아갑니다.'},
+    '検索バーの条件に追加して適用': {"en": 'Add to search bar conditions and apply', "zh": '添加到搜索栏条件并应用', "ko": '검색 바 조건에 추가하여 적용'},
+    '検索履歴（クリックで再実行 / 検索欄で ↑↓ キー）': {"en": 'Search history (click to rerun / ↑↓ keys in search box)', "zh": '搜索历史（点击重新执行 / 在搜索框中按 ↑↓ 键）', "ko": '검색 기록 (클릭하여 재실행 / 검색란에서 ↑↓ 키)'},
+    '検索範囲（検索バーの照合対象）': {"en": 'Search scope (search bar match target)', "zh": '搜索范围（搜索栏的匹配目标）', "ko": '검색 범위 (검색 바의 대조 대상)'},
+    '構文': {"en": 'Syntax', "zh": '语法', "ko": '구문'},
+    '標準': {"en": 'Standard', "zh": '标准', "ko": '표준'},
+    '次のフォルダはありません': {"en": 'No next folder', "zh": '没有下一文件夹', "ko": '다음 폴더가 없습니다'},
+    '正規表現として解釈': {"en": 'Interpret as regex', "zh": '按正则表达式解析', "ko": '정규식으로 해석'},
+    '没入モード (Space/F11)': {"en": 'Immersive mode (Space/F11)', "zh": '沉浸模式 (Space/F11)', "ko": '몰입 모드 (Space/F11)'},
+    '現フォルダ': {"en": 'Current folder', "zh": '当前文件夹', "ko": '현재 폴더'},
+    '現在 ': {"en": 'Current ', "zh": '当前 ', "ko": '현재 '},
+    '現在のAI判定は『破綻検出』ではありません。\naesthetic-shadow 系モデルを使った『見た目の好ましさ』寄りの評価です。\n\n判定の意味:\n高 : hq かつ score 0.5以上\n中 : 上の高/低に入らないもの\n低 : lq かつ score 0.5以上\n未 : まだAI評価していない\n\n注意:\n・ぼけや手崩れがあっても高になることがあります\n・『失敗画像検出』専用ではありません\n・低だけを荒く間引く用途向けです\n\nAI速度:\n自動 / 省メモリ / 標準 / 高速 / 最大 を選べます\nVRAM が少ない場合は 省メモリ、速さ優先なら 高速 / 最大 を使います\n\n使い方:\n1. ツール > AI画像評価 > AI評価を開始\n2. 下の進捗バーで完了まで待つ\n3. ツール > AI画像評価 > 低だけ表示 で確認\n4. 必要なら 低を全選択 / 低を削除 を使う': {"en": 'The current AI rating is not "breakage detection".\nIt uses an aesthetic-shadow family model leaning toward "visual preference".\n\nMeaning of ratings:\nHigh : hq and score 0.5 or higher\nMedium : anything not High/Low\nLow : lq and score 0.5 or higher\nN/A : not yet AI-rated\n\nNote:\n- Images may be rated High even if blurry or with hand artifacts\n- This is not a dedicated "failure detection" tool\n- Only suitable for roughly thinning out Low-rated images\n\nAI speed:\nYou can choose Auto / Low memory / Standard / Fast / Max\nUse Low memory if VRAM is limited, or Fast / Max if speed is priority\n\nHow to use:\n1. Tools > AI Image Rating > Start AI rating\n2. Wait for completion via the progress bar below\n3. Check via Tools > AI Image Rating > Show only low\n4. Optionally use Select all low / Delete low', "zh": '当前的 AI 判定并非「破损检测」。\n它是基于 aesthetic-shadow 系列模型、偏向「视觉美感」的评价。\n\n判定含义：\n高 : hq 且 score ≥ 0.5\n中 : 不属于高/低的图片\n低 : lq 且 score ≥ 0.5\n未 : 尚未经过 AI 评价\n\n注意：\n・即使模糊或手崩，也可能被判定为高\n・它并非专门的「失败图片检测」工具\n・仅适合用于粗略剔除低评分图片\n\nAI 速度：\n可选择 自动 / 省内存 / 标准 / 高速 / 最大\nVRAM 较少时请用 省内存，追求速度请用 高速 / 最大\n\n使用方法：\n1. 工具 > AI 图片评价 > 开始 AI 评价\n2. 下方进度条等待完成\n3. 通过 工具 > AI 图片评价 > 仅显示低分 查看\n4. 需要时使用 全选低分 / 删除低分', "ko": '현재 AI 판정은 『파손 검출』이 아닙니다.\naesthetic-shadow 계열 모델을 사용한 『시각적 호감』 위주의 평가입니다.\n\n판정의 의미:\n높음 : hq 그리고 score 0.5 이상\n보통 : 위의 높음/낮음에 해당하지 않는 것\n낮음 : lq 그리고 score 0.5 이상\n미평가 : 아직 AI 평가하지 않음\n\n주의:\n・흐리거나 손이 깨져도 높음이 될 수 있습니다\n・『실패 이미지 검출』 전용이 아닙니다\n・낮음만 거칠게 솎아내는 용도에 적합합니다\n\nAI 속도:\n자동 / 저메모리 / 표준 / 고속 / 최대 를 선택할 수 있습니다\nVRAM이 적으면 저메모리, 속도 우선이면 고속 / 최대 를 사용하세요\n\n사용 방법:\n1. 도구 > AI 이미지 평가 > AI 평가 시작\n2. 아래 진행 표시줄로 완료까지 대기\n3. 도구 > AI 이미지 평가 > 낮음만 표시 에서 확인\n4. 필요하면 낮음 전체 선택 / 낮음 삭제 를 사용'},
+    '現在のフォルダをお気に入りに追加': {"en": 'Add current folder to favorites', "zh": '将当前文件夹添加到收藏', "ko": '현재 폴더를 즐겨찾기에 추가'},
+    '現在の表示対象 ': {"en": 'Currently showing ', "zh": '当前显示对象 ', "ko": '현재 표시 대상 '},
+    '環境設定を保存しました': {"en": 'Settings saved', "zh": '已保存环境设置', "ko": '환경 설정을 저장했습니다'},
+    '生成ステップ数の範囲。値が不明な画像は除外されます': {"en": 'Number of steps range. Images with unknown values are excluded.', "zh": '生成步数范围。值未知的图片将被排除。', "ko": '생성 스텝 수 범위. 알 수 없는 값의 이미지는 제외됩니다'},
+    '生成パラメータ': {"en": 'Generation parameters', "zh": '生成参数', "ko": '생성 파라미터'},
+    '画像が見つかりません': {"en": 'Image not found', "zh": '未找到图片', "ko": '이미지를 찾을 수 없습니다'},
+    '画像を読み込めません': {"en": 'Cannot read image', "zh": '无法读取图片', "ko": '이미지를 불러올 수 없습니다'},
+    '画像を選択してから実行してください': {"en": 'Select an image first', "zh": '请先选择图片', "ko": '이미지를 선택한 뒤 실행하세요'},
+    '画像サイズ': {"en": 'Image size', "zh": '图片尺寸', "ko": '이미지 크기'},
+    '画像ファイル (*.png *.PNG *.jpg *.jpeg *.webp)': {"en": 'Image files (*.png *.PNG *.jpg *.jpeg *.webp)', "zh": '图片文件 (*.png *.PNG *.jpg *.jpeg *.webp)', "ko": '이미지 파일 (*.png *.PNG *.jpg *.jpeg *.webp)'},
+    '画像端でのループ': {"en": 'Loop at image edges', "zh": '图片边缘循环', "ko": '이미지 끝에서의 반복'},
+    '省メモリ': {"en": 'Low memory', "zh": '省内存', "ko": '저메모리'},
+    '短辺(px) の範囲。寸法が不明な画像は除外されます': {"en": 'Short side (px) range. Images with unknown dimensions are excluded.', "zh": '短边(px) 范围。尺寸未知的图片将被排除。', "ko": '짧은 변(px) 범위. 크기가 알 수 없는 이미지는 제외됩니다'},
+    '確認': {"en": 'Confirm', "zh": '确认', "ko": '확인'},
+    '秒': {"en": ' sec', "zh": ' 秒', "ko": ' 초'},
+    '端で停止（画像上にメッセージ表示）': {"en": 'Stop at edge (message shown on image)', "zh": '在边缘停止（在图片上显示消息）', "ko": '끝에서 정지 (이미지 위에 메시지 표시)'},
+    '等倍 (0)': {"en": 'Actual size (0)', "zh": '原始大小 (0)', "ko": '실제 크기 (0)'},
+    '範囲指定': {"en": 'Range', "zh": '范围指定', "ko": '범위 지정'},
+    '約 ': {"en": 'About ', "zh": '约 ', "ko": '약 '},
+    '終了': {"en": 'Exit', "zh": '退出', "ko": '종료'},
+    '終了 2026-12-31': {"en": 'End 2026-12-31', "zh": '结束 2026-12-31', "ko": '종료 2026-12-31'},
+    '縮小 (-)': {"en": 'Zoom out (-)', "zh": '缩小 (-)', "ko": '축소 (-)'},
+    '自動': {"en": 'Auto', "zh": '自动', "ko": '자동'},
+    '表示 ': {"en": 'View ', "zh": '显示 ', "ko": '표시 '},
+    '表示(&V)': {"en": 'View(&V)', "zh": '显示(&V)', "ko": '보기(&V)'},
+    '表示レイアウト切り替え': {"en": 'Switch display layout', "zh": '切换显示布局', "ko": '표시 레이아웃 전환'},
+    '表示枚数 / 総枚数': {"en": 'Shown / total', "zh": '显示数量 / 总数量', "ko": '표시 수 / 전체 수'},
+    '解像度': {"en": 'Resolution', "zh": '分辨率', "ko": '해상도'},
+    '設定(&S)': {"en": 'Settings(&S)', "zh": '设置(&S)', "ko": '설정(&S)'},
+    '詳細パネルの条件をすべて初期状態に戻します（検索バーの入力は残ります）': {"en": 'Reset all conditions in the Details panel to default (the search bar input is kept)', "zh": '将详细面板的所有条件恢复为初始状态（搜索栏输入保留）', "ko": '상세 패널의 모든 조건을 초기 상태로 되돌립니다 (검색 바 입력은 유지됩니다)'},
+    '詳細プロパティを開く...': {"en": 'Open advanced properties...', "zh": '打开详细属性...', "ko": '상세 속성 열기...'},
+    '詳細検索: 検索範囲 / 除外語・フレーズ / 正規表現 /\n日付・解像度・サイズ範囲 / Seed・Sampler・Steps・CFG / 検索履歴': {"en": 'Advanced search: scope / exclusion phrases / regex /\ndate, resolution, size range / Seed, Sampler, Steps, CFG / search history', "zh": '详细搜索：搜索范围 / 排除词·短语 / 正则表达式 /\n日期·分辨率·大小范围 / Seed·Sampler·Steps·CFG / 搜索历史', "ko": '상세 검색: 검색 범위 / 제외어·구문 / 정규식 /\n날짜·해상도·크기 범위 / Seed·Sampler·Steps·CFG / 검색 기록'},
+    '読み込み': {"en": 'Load', "zh": '读取', "ko": '불러오기'},
+    '読み込み中...': {"en": 'Loading...', "zh": '正在读取...', "ko": '읽는 중...'},
+    '読み込む拡張子（チェック=有効）': {"en": 'Extensions to load (checked = enabled)', "zh": '要读取的扩展名（勾选=启用）', "ko": '불러올 확장자 (체크=활성)'},
+    '読み込めませんでした: ': {"en": 'Could not load: ', "zh": '无法读取：', "ko": '불러올 수 없습니다: '},
+    '適用': {"en": 'Apply', "zh": '应用', "ko": '적용'},
+    '配置': {"en": 'Layout', "zh": '排列', "ko": '배치'},
+    '重複': {"en": 'Duplicates', "zh": '重复', "ko": '중복'},
+    '重複グループはすべて処理されました。': {"en": 'All duplicate groups have been processed.', "zh": '已处理完所有重复分组。', "ko": '모든 중복 그룹을 처리했습니다.'},
+    '重複グループを表示: ': {"en": 'Show duplicate groups: ', "zh": '显示重复分组：', "ko": '중복 그룹 표시: '},
+    '重複タグを削除してコピー': {"en": 'Copy with duplicate tags removed', "zh": '删除重复标签后复制', "ko": '중복 태그를 삭제하고 복사'},
+    '重複検出する画像がありません': {"en": 'No images to detect duplicates in', "zh": '没有可供重复检测的图片', "ko": '중복 검출할 이미지가 없습니다'},
+    '重複画像': {"en": 'Duplicate images', "zh": '重复图片', "ko": '중복 이미지'},
+    '重複画像: ': {"en": 'Duplicate images: ', "zh": '重复图片：', "ko": '중복 이미지: '},
+    '重複画像: 完全一致を検出中...': {"en": 'Duplicate images: detecting exact matches...', "zh": '重复图片：正在检测完全一致...', "ko": '중복 이미지: 완전 일치 검출 중...'},
+    '重複画像: 類似ハッシュ計算中... ': {"en": 'Duplicate images: computing similar hashes... ', "zh": '重复图片：正在计算相似哈希... ', "ko": '중복 이미지: 유사 해시 계산 중... '},
+    '重複画像: 類似画像を検出中...': {"en": 'Duplicate images: detecting similar images...', "zh": '重复图片：正在检测相似图片...', "ko": '중복 이미지: 유사 이미지 검출 중...'},
+    '重複画像は見つかりませんでした': {"en": 'No duplicate images found', "zh": '未找到重复图片', "ko": '중복 이미지를 찾을 수 없습니다'},
+    '重複画像は見つかりませんでした。': {"en": 'No duplicate images found.', "zh": '未找到重复图片。', "ko": '중복 이미지를 찾을 수 없습니다.'},
+    '重複画像を検出中...': {"en": 'Detecting duplicate images...', "zh": '正在检测重复图片...', "ko": '중복 이미지 검출 중...'},
+    '重複画像検出': {"en": 'Duplicate detection', "zh": '重复图片检测', "ko": '중복 이미지 검출'},
+    '閉じる': {"en": 'Close', "zh": '关闭', "ko": '닫기'},
+    '閉じる (Esc)': {"en": 'Close (Esc)', "zh": '关闭 (Esc)', "ko": '닫기 (Esc)'},
+    '閉じる (Esc/Enter)': {"en": 'Close (Esc/Enter)', "zh": '关闭 (Esc/Enter)', "ko": '닫기 (Esc/Enter)'},
+    '開始': {"en": 'Start', "zh": '开始', "ko": '시작'},
+    '開始 2026-01-01': {"en": 'Start 2026-01-01', "zh": '开始 2026-01-01', "ko": '시작 2026-01-01'},
+    '類似': {"en": 'Similar', "zh": '相似', "ko": '유사'},
+    '類似画像: ': {"en": 'Similar images: ', "zh": '相似图片：', "ko": '유사 이미지: '},
+    '類似画像を検索中...': {"en": 'Searching similar images...', "zh": '正在搜索相似图片...', "ko": '유사 이미지 검색 중...'},
+    '高': {"en": 'High', "zh": '高', "ko": '높음'},
+    '高 = hq かつ score 0.5以上 / 低 = lq かつ score 0.5以上 / それ以外 = 中': {"en": 'High = hq & score ≥ 0.5 / Low = lq & score ≥ 0.5 / otherwise = Medium', "zh": '高 = hq 且 score ≥ 0.5 / 低 = lq 且 score ≥ 0.5 / 其他 = 中', "ko": '높음 = hq 및 score 0.5 이상 / 낮음 = lq 및 score 0.5 이상 / 그 외 = 보통'},
+    '高:': {"en": 'High:', "zh": '高：', "ko": '높음:'},
+    '高速': {"en": 'High speed', "zh": '高速', "ko": '고속'},
+    '（YYYY-MM-DD / YYYY/MM/DD / YYYYMMDD / YYYY-MM で入力してください。この条件は無視しました）': {"en": '(Enter as YYYY-MM-DD / YYYY/MM/DD / YYYYMMDD / YYYY-MM. This condition was ignored.)', "zh": '（请以 YYYY-MM-DD / YYYY/MM/DD / YYYYMMDD / YYYY-MM 输入。此条件已被忽略）', "ko": '(YYYY-MM-DD / YYYY/MM/DD / YYYYMMDD / YYYY-MM 형식으로 입력하세요. 이 조건은 무시되었습니다)'},
+    '（通常の部分一致で検索します）': {"en": '(searching with normal partial match)', "zh": '（使用普通部分匹配搜索）', "ko": '(일반 부분 일치로 검색합니다)'},
+    '）\n\n計 ': {"en": ')\n\nTotal ', "zh": '）\n\n合计 ', "ko": ')\n\n합계 '},
+    '🌐 Civitai で開く': {"en": '🌐 Open on Civitai', "zh": '🌐 在 Civitai 上打开', "ko": '🌐 Civitai 에서 열기'},
+    '🎨 ロゴ/タグ連動設定': {"en": '🎨 Logo/tag linkage settings', "zh": '🎨 Logo/标签联动设置', "ko": '🎨 로고/태그 연동 설정'},
+    '🎨 ロゴオーバーレイ': {"en": '🎨 Logo overlay', "zh": '🎨 Logo 叠加', "ko": '🎨 로고 오버레이'},
+    '🏷 タグ一覧': {"en": '🏷 Tag list', "zh": '🏷 标签列表', "ko": '🏷 태그 목록'},
+    '👀 このグループを表示': {"en": '👀 Show this group', "zh": '👀 显示此分组', "ko": '👀 이 그룹 표시'},
+    '👀 選択グループをグリッド表示': {"en": '👀 Show selected groups in grid', "zh": '👀 以网格显示所选分组', "ko": '👀 선택 그룹을 그리드 표시'},
+    '💡 初回読み込みはキャッシュ生成のため時間がかかります': {"en": '💡 First load takes time due to cache generation', "zh": '💡 首次读取因生成缓存需要一些时间', "ko": '💡 최초 불러오기는 캐시 생성으로 시간이 걸립니다'},
+    '💾 CSV出力': {"en": '💾 Export CSV', "zh": '💾 导出 CSV', "ko": '💾 CSV 출력'},
+    '💾 サムネキャッシュの保存先と容量': {"en": '💾 Thumbnail cache location and size', "zh": '💾 缩略图缓存的保存位置和容量', "ko": '💾 썸네일 캐시 저장 위치와 용량'},
+    '💾 保存': {"en": '💾 Save', "zh": '💾 保存', "ko": '💾 저장'},
+    '💾 合成画像を出力...': {"en": '💾 Export composed image...', "zh": '💾 导出合成图片...', "ko": '💾 합성 이미지 출력...'},
+    '📁 サブフォルダを含む': {"en": '📁 Include subfolders', "zh": '📁 包含子文件夹', "ko": '📁 하위 폴더 포함'},
+    '📁 フォルダ': {"en": '📁 Folder', "zh": '📁 文件夹', "ko": '📁 폴더'},
+    '📁 フォルダパネルを表示': {"en": '📁 Show folder panel', "zh": '📁 显示文件夹面板', "ko": '📁 폴더 패널 표시'},
+    '📁 ブックマーク一覧': {"en": '📁 Bookmark list', "zh": '📁 书签列表', "ko": '📁 북마크 목록'},
+    '📁 保存フォルダを開く': {"en": '📁 Open save folder', "zh": '📁 打开保存文件夹', "ko": '📁 저장 폴더 열기'},
+    '📂 このフォルダを開く': {"en": '📂 Open this folder', "zh": '📂 打开此文件夹', "ko": '📂 이 폴더 열기'},
+    '📂 エクスプローラーで選択': {"en": '📂 Show in Explorer', "zh": '📂 在资源管理器中选择', "ko": '📂 탐색기에서 선택'},
+    '📂 エクスプローラーで選択(': {"en": '📂 Show in Explorer (', "zh": '📂 在资源管理器中选择（', "ko": '📂 탐색기에서 선택('},
+    '📂 フォルダを開く': {"en": '📂 Open folder', "zh": '📂 打开文件夹', "ko": '📂 폴더 열기'},
+    '📂 開く': {"en": '📂 Open', "zh": '📂 打开', "ko": '📂 열기'},
+    '📊 LoRA 使用率分析': {"en": '📊 LoRA usage analysis', "zh": '📊 LoRA 使用率分析', "ko": '📊 LoRA 사용률 분석'},
+    '📊 ロード統計': {"en": '📊 Load stats', "zh": '📊 加载统计', "ko": '📊 로드 통계'},
+    '📊 ロード統計 (': {"en": '📊 Load stats (', "zh": '📊 加载统计（', "ko": '📊 로드 통계 ('},
+    '📋 Negative をそのままコピーしました': {"en": '📋 Negative copied as-is', "zh": '📋 Negative 已原样复制', "ko": '📋 Negative 를 그대로 복사했습니다'},
+    '📋 Positive をそのままコピーしました': {"en": '📋 Positive copied as-is', "zh": '📋 Positive 已原样复制', "ko": '📋 Positive 를 그대로 복사했습니다'},
+    '📋 Seed をコピーしました: ': {"en": '📋 Seed copied: ', "zh": '📋 Seed 已复制：', "ko": '📋 Seed 를 복사했습니다: '},
+    '📋 アクティビティログ': {"en": '📋 Activity log', "zh": '📋 活动日志', "ko": '📋 활동 로그'},
+    '📋 アクティビティログを表示': {"en": '📋 Show activity log', "zh": '📋 显示活动日志', "ko": '📋 활동 로그 표시'},
+    '📋 コピー': {"en": '📋 Copy', "zh": '📋 复制', "ko": '📋 복사'},
+    '📋 コピー  Ctrl+C': {"en": '📋 Copy  Ctrl+C', "zh": '📋 复制  Ctrl+C', "ko": '📋 복사  Ctrl+C'},
+    '📋 コピー(重複無し)': {"en": '📋 Copy (no duplicates)', "zh": '📋 复制（去重）', "ko": '📋 복사(중복 없음)'},
+    '📋 コピーしました: ': {"en": '📋 Copied: ', "zh": '📋 已复制：', "ko": '📋 복사했습니다: '},
+    '📋 パスをコピー': {"en": '📋 Copy path', "zh": '📋 复制路径', "ko": '📋 경로 복사'},
+    '📋 メタ情報': {"en": '📋 Metadata', "zh": '📋 元数据', "ko": '📋 메타 정보'},
+    '📋 名前をコピー  —  ': {"en": '📋 Copy name  —  ', "zh": '📋 复制名称  —  ', "ko": '📋 이름 복사  —  '},
+    '📋✨ Negative をコピーしました（重複': {"en": '📋✨ Negative copied (duplicates ', "zh": '📋✨ Negative 已复制（重复', "ko": '📋✨ Negative 를 복사했습니다 (중복'},
+    '📋✨ Negative をコピーしました（重複なし）': {"en": '📋✨ Negative copied (no duplicates)', "zh": '📋✨ Negative 已复制（无重复）', "ko": '📋✨ Negative 를 복사했습니다 (중복 없음)'},
+    '📋✨ Positive をコピーしました（重複': {"en": '📋✨ Positive copied (duplicates ', "zh": '📋✨ Positive 已复制（重复', "ko": '📋✨ Positive 를 복사했습니다 (중복'},
+    '📋✨ Positive をコピーしました（重複なし）': {"en": '📋✨ Positive copied (no duplicates)', "zh": '📋✨ Positive 已复制（无重复）', "ko": '📋✨ Positive 를 복사했습니다 (중복 없음)'},
+    '📏 位置ルーラーを表示': {"en": '📏 Show position ruler', "zh": '📏 显示位置标尺', "ko": '📏 위치 눈금자 표시'},
+    '📐 パネル幅の設定': {"en": '📐 Panel width settings', "zh": '📐 面板宽度设置', "ko": '📐 패널 너비 설정'},
+    '📐 メタパネルを表示': {"en": '📐 Show meta panel', "zh": '📐 显示元数据面板', "ko": '📐 메타 패널 표시'},
+    '📐 ロゴ位置・サイズ調整': {"en": '📐 Logo position / size adjustment', "zh": '📐 Logo 位置・大小调整', "ko": '📐 로고 위치·크기 조정'},
+    '📐 位置・サイズ調整...': {"en": '📐 Position / size adjustment...', "zh": '📐 位置・大小调整...', "ko": '📐 위치·크기 조정...'},
+    '📥 貼り付け  Ctrl+V': {"en": '📥 Paste  Ctrl+V', "zh": '📥 粘贴  Ctrl+V', "ko": '📥 붙여넣기  Ctrl+V'},
+    '🔄 再分析': {"en": '🔄 Re-analyze', "zh": '🔄 重新分析', "ko": '🔄 재분석'},
+    '🔄 再読み込み': {"en": '🔄 Reload', "zh": '🔄 重新读取', "ko": '🔄 다시 불러오기'},
+    '🔍 この画像で絞り込み': {"en": '🔍 Filter by this image', "zh": '🔍 按此图片筛选', "ko": '🔍 이 이미지로 필터링'},
+    '🔍 タグを検索...': {"en": '🔍 Search tags...', "zh": '🔍 搜索标签...', "ko": '🔍 태그 검색...'},
+    '🔍 モデルで絞り込み: ': {"en": '🔍 Filter by model: ', "zh": '🔍 按模型筛选：', "ko": '🔍 모델로 필터링: '},
+    '🔍 詳細検索': {"en": '🔍 Advanced search', "zh": '🔍 详细搜索', "ko": '🔍 상세 검색'},
+    '🔍 重複画像を検出': {"en": '🔍 Detect duplicate images', "zh": '🔍 检测重复图片', "ko": '🔍 중복 이미지 검출'},
+    '🔍 重複画像検出結果': {"en": '🔍 Duplicate detection results', "zh": '🔍 重复图片检测结果', "ko": '🔍 중복 이미지 검출 결과'},
+    '🔍 類似画像検索': {"en": '🔍 Similar image search', "zh": '🔍 相似图片搜索', "ko": '🔍 유사 이미지 검색'},
+    '🔍詳細': {"en": '🔍 Details', "zh": '🔍 详细', "ko": '🔍 상세'},
+    '🔍詳細●': {"en": '🔍 Details ●', "zh": '🔍 详细 ●', "ko": '🔍 상세 ●'},
+    '🖼 ロゴを設定...': {"en": '🖼 Set logo...', "zh": '🖼 设置 Logo...', "ko": '🖼 로고 설정...'},
+    '🖼 全サムネイルを一括生成': {"en": '🖼 Generate all thumbnails in batch', "zh": '🖼 批量生成全部缩略图', "ko": '🖼 전체 썸네일 일괄 생성'},
+    '🖼 全画面で開く': {"en": '🖼 Open fullscreen', "zh": '🖼 全屏打开', "ko": '🖼 전체 화면으로 열기'},
+    '🗑 お気に入りから削除': {"en": '🗑 Remove from favorites', "zh": '🗑 从收藏中删除', "ko": '🗑 즐겨찾기에서 삭제'},
+    '🗑 クリア': {"en": '🗑 Clear', "zh": '🗑 清除', "ko": '🗑 지우기'},
+    '🗑 サムネキャッシュをクリア': {"en": '🗑 Clear thumbnail cache', "zh": '🗑 清除缩略图缓存', "ko": '🗑 썸네일 캐시 지우기'},
+    '🗑 チェック済みを削除': {"en": '🗑 Delete checked', "zh": '🗑 删除已勾选', "ko": '🗑 체크된 것 삭제'},
+    '🗑 チェック項目を削除': {"en": '🗑 Delete checked items', "zh": '🗑 删除勾选项', "ko": '🗑 체크 항목 삭제'},
+    '🗑 メタキャッシュを初期化': {"en": '🗑 Initialize meta cache', "zh": '🗑 初始化元数据缓存', "ko": '🗑 메타 캐시 초기화'},
+    '🗑 ロゴ設定を削除': {"en": '🗑 Delete logo setting', "zh": '🗑 删除 Logo 设置', "ko": '🗑 로고 설정 삭제'},
+    '🗑 削除': {"en": '🗑 Delete', "zh": '🗑 删除', "ko": '🗑 삭제'},
+    '🗑 削除  Delete': {"en": '🗑 Delete  Delete', "zh": '🗑 删除  Delete', "ko": '🗑 삭제  Delete'},
+    '🗑 削除  —  ': {"en": '🗑 Delete  —  ', "zh": '🗑 删除  —  ', "ko": '🗑 삭제  —  '},
+    '🧰 ツールバーを表示': {"en": '🧰 Show toolbar', "zh": '🧰 显示工具栏', "ko": '🧰 도구 모음 표시'},
+    '🧹 サムネキャッシュを整理（古い順に上限まで）': {"en": '🧹 Clean thumbnail cache (oldest first, up to limit)', "zh": '🧹 整理缩略图缓存（从最旧开始，直到达到上限）', "ko": '🧹 썸네일 캐시 정리 (오래된 순, 상한까지)'},
+    '枚でスキャン完了  ': {"en": 'images scanned  (', "zh": ' 张扫描完成  （', "ko": ' 장으로 스캔 완료  ('},
+    '(未使用 ': {"en": 'unused ', "zh": ' 未使用 ', "ko": ' 미사용 '},
+    ' ファイルを完全に削除します。\n': {"en": ' Delete permanently.\n', "zh": ' 彻底删除该文件。\n', "ko": ' 파일을 완전히 삭제합니다.\n'},
+    'この操作は取り消せません。\n\n': {"en": 'This cannot be undone.\n\n', "zh": '此操作无法撤销。\n\n', "ko": '이 작업은 취소할 수 없습니다.\n\n'},
+    '※ ロゴを登録したときはここに保存されます。\n': {"en": '※ Registered logo images are saved here.\n', "zh": '※ 注册的 Logo 图片将保存在这里。\n', "ko": '※ 등록한 로고는 여기에 저장됩니다.\n'},
+    '※ 既定の保存先: ': {"en": '※ Default location: ', "zh": '※ 默认保存位置：', "ko": '※ 기본 저장 위치: '},
+    '※ 保存先を変更しても、ここに表示されている場所が現在の保存先です。': {"en": '※ Even if the location is changed, the path shown here is the current save location.', "zh": '※ 即使更改了保存位置，这里显示的仍然是当前保存位置。', "ko": '※ 저장 위치를 변경해도 여기에 표시된 경로가 현재 저장 위치입니다.'},
+    '場所: ': {"en": 'Location: ', "zh": '位置：', "ko": '위치: '},
+    'サイズ: ': {"en": 'Size: ', "zh": '大小：', "ko": '크기: '},
+    ' バイト)\n': {"en": ' bytes)\n', "zh": ' 字节）\n', "ko": ' 바이트)\n'},
+    '画像サイズ: ': {"en": 'Image size: ', "zh": '图片尺寸：', "ko": '이미지 크기: '},
+    '作成日時: ': {"en": 'Created: ', "zh": '创建时间：', "ko": '생성 일시: '},
+    '更新日時: ': {"en": 'Modified: ', "zh": '更新时间：', "ko": '수정 일시: '},
+    'PySide6 版 — tkinter 版 v11 を完全書き直し<br>': {"en": 'PySide6 version — complete rewrite of the tkinter version v11<br>', "zh": 'PySide6 版 — 完全重写了 tkinter 版 v11<br>', "ko": 'PySide6 버전 — tkinter 버전 v11을 완전히 재작성<br>'},
+    '<br>依存: PySide6, Pillow': {"en": '<br>Dependencies: PySide6, Pillow', "zh": '<br>依赖：PySide6, Pillow', "ko": '<br>의존성: PySide6, Pillow'},
+    '  |  類似: ': {"en": '  |  Similar: ', "zh": '  |  相似：', "ko": '  |  유사: '},
+    '  |  選択中グループ: ': {"en": '  |  Selected group: ', "zh": '  |  所选分组：', "ko": '  |  선택 그룹: '},
+    '計 ': {"en": 'Total ', "zh": '合计 ', "ko": '합계 '},
+    '現行形式 .raw: ': {"en": 'Current .raw format: ', "zh": '当前格式 .raw：', "ko": '현재 형식 .raw: '},
+    '保存先を変える場合は settings.json に絶対パスの `thumb_cache_dir` を指定します。': {"en": 'To change the location, set an absolute path `thumb_cache_dir` in settings.json.', "zh": '如需更改保存位置，请在 settings.json 中指定绝对路径 `thumb_cache_dir`。', "ko": '저장 위치를 변경하려면 settings.json 에 절대 경로 `thumb_cache_dir` 를 지정하세요.'},
+    '移行時は先に丸ごとコピーし、全件サイズ一致を確認してから元を削除してください': {"en": 'When migrating, copy everything first, verify all file sizes match, then delete the original', "zh": '迁移时请先完整复制，确认所有文件大小一致后再删除原文件', "ko": '마이그레이션 시에는 먼저 전체를 복사하고 모든 파일 크기가 일치하는지 확인한 뒤 원본을 삭제하세요'},
+    '（コピー先に `.fmt_version` が無いと起動時の自動消去で全キャッシュが消えます）。': {"en": ' (without `.fmt_version` in the destination, the automatic cleanup at startup will delete the entire cache).', "zh": '（如果目标位置没有 `.fmt_version`，启动时的自动清理会删除全部缓存）。', "ko": '(대상에 `.fmt_version` 이 없으면 시작 시 자동 정리로 전체 캐시가 삭제됩니다).'},
+    '（現行コードは読まない残骸）': {"en": ' (remnants not read by current code)', "zh": '（当前代码不读取的残留）', "ko": '(현재 코드가 읽지 않는 잔여물)'},
+    '保持する上限を MB で指定してください（古いものから削除されます）。': {"en": 'Enter the limit to keep in MB (oldest files will be deleted first).', "zh": '请以 MB 指定要保留的上限（将从最旧的开始删除）。', "ko": '유지할 상한을 MB 단위로 지정하세요 (오래된 것부터 삭제됩니다).'},
+    'MB を削除します。続行しますか？\n': {"en": ' MB will be deleted. Continue?\n', "zh": ' MB 将被删除。是否继续？\n', "ko": ' MB 를 삭제합니다. 계속하시겠습니까?\n'},
+    '対応するサムネイルは次回表示時に再生成されます（画像本体は消えません）。\n': {"en": 'Related thumbnails will be regenerated next time they are displayed (original images are not deleted).\n', "zh": '对应缩略图下次显示时将重新生成（原图不会被删除）。\n', "ko": '해당 썸네일은 다음 표시 시 다시 생성됩니다 (이미지 원본은 삭제되지 않습니다).\n'},
+    '旧形式 .pkl は再生成されず、そのまま不要になります。': {"en": 'Legacy .pkl will not be regenerated and will simply become obsolete.', "zh": '旧格式 .pkl 不会重新生成，也不再需要。', "ko": '구형식 .pkl 은 재생성되지 않으며 그대로 불필요해집니다.'},
+    'MB を削除しました。\n': {"en": ' MB deleted.\n', "zh": ' MB 已删除。\n', "ko": ' MB 삭제됨.\n'},
+    '残り ': {"en": 'Remaining ', "zh": '剩余 ', "ko": '남은 '},
+    ' 件のサムネイルをバックグラウンドで生成しますか？\n': {"en": ' Generate thumbnails in the background?\n', "zh": ' 个缩略图？\n', "ko": ' 개의 썸네일을 백그라운드에서 생성할까요?\n'},
+    '※数万枚ある場合はディスクI/Oにより一時的に動作が重くなる場合があります。': {"en": '※ With tens of thousands of images, disk I/O may temporarily make the app sluggish.', "zh": '※ 如果有几万张图片，磁盘 I/O 可能会暂时使应用变慢。', "ko": '※ 수만 장인 경우 디스크 I/O 때문에 일시적으로 동작이 느려질 수 있습니다.'},
+    'thumb_mem=メモリヒット / thumb_disk=ディスクサムネ読込 / thumb_decode=デコード+縮小\n': {"en": 'thumb_mem=memory hit / thumb_disk=disk thumbnail read / thumb_decode=decode+resize\n', "zh": 'thumb_mem=内存命中 / thumb_disk=磁盘缩略图读取 / thumb_decode=解码+缩小\n', "ko": 'thumb_mem=메모리 히트 / thumb_disk=디스크 썸네일 읽기 / thumb_decode=디코드+리사이즈\n'},
+    'プロンプトに指定したタグが含まれる画像に自動でロゴを適用します。\n': {"en": 'Automatically applies a logo to images whose prompt contains the specified tag.\n', "zh": '提示词中包含指定标签的图片将自动应用 Logo。\n', "ko": '프롬프트에 지정한 태그가 포함된 이미지에 로고를 자동 적용합니다.\n'},
+    'ロゴの保存先が変更されました。\n\n': {"en": 'The logo save location has changed.\n\n', "zh": 'Logo 保存位置已更改。\n\n', "ko": '로고 저장 위치가 변경되었습니다.\n\n'},
+    '現在: ': {"en": 'Current: ', "zh": '当前：', "ko": '현재: '},
+    '変更先: ': {"en": 'Change to: ', "zh": '更改为：', "ko": '변경 대상: '},
+    '既存のロゴ画像を新しい保存先へ移動しますか？': {"en": 'Move existing logo images to the new location?', "zh": '是否将现有 Logo 图片移动到新的保存位置？', "ko": '기존 로고 이미지를 새 저장 위치로 이동하시겠습니까?'},
+    '言語': {"en": 'Language', "zh": '语言', "ko": '언어'},
+    '表示言語': {"en": 'Display language', "zh": '显示语言', "ko": '표시 언어'},
+    'アプリを再起動すると新しい言語で表示されます': {"en": 'Restart the app to apply the new language.', "zh": '重新启动应用后将以新语言显示。', "ko": '앱을 다시 시작하면 새 언어로 표시됩니다.'},
+}
+
+
+def _resolve_cache_dir() -> Path:
+    """サムネ disk キャッシュの置き場（settings.json の `thumb_cache_dir`）。
+
+    14GB 規模のキャッシュが C: を圧迫するため、任意ドライブへ逃がせるようにする。
+    未設定・相対パス・読込失敗は従来通り LOCALAPPDATA 配下にフォールバックする。
+    """
+    try:
+        p = json.loads(SETTINGS_FILE.read_text("utf-8")).get("thumb_cache_dir")
+    except Exception:
+        p = None
+    if isinstance(p, str) and p.strip():
+        q = Path(p.strip())
+        if q.is_absolute():
+            return q
+    return APP_DIR / "thumbs"
+
+
 RATINGS_FILE = APP_DIR / "ratings.json"
 QUALITY_CACHE_FILE = Path(os.environ.get("APPDATA", Path.home())) / "AIVideoManager" / "quality_cache.json"
 APP_DIR.mkdir(parents=True, exist_ok=True)
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
+CACHE_DIR    = _resolve_cache_dir()
+try:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    # 指定先がネットワーク／外付けで現在マウントされていない場合など。
+    # 起動に失敗させず、従来のローカルキャッシュへ戻る。
+    CACHE_DIR = APP_DIR / "thumbs"
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 LOGO_DIR     = APP_DIR / "logo"
 LOGO_DIR.mkdir(parents=True, exist_ok=True)
@@ -150,7 +900,7 @@ def _unique_dest_path(dst_dir: Path, name: str) -> Path:
         cand = dst_dir / f"{stem}_{i}{suffix}"
         if not cand.exists():
             return cand
-    raise FileExistsError(f"保存先のファイル名が多すぎます: {name}")
+    raise FileExistsError(f"{Te('保存先のファイル名が多すぎます: ')}{name}")
 
 
 def _set_windows_app_id():
@@ -175,12 +925,17 @@ def _build_app_icon() -> QIcon:
         try:
             _os.write(_fd, _ico_bytes)
             _os.close(_fd)
-            return QIcon(_tmp_path)
+            # QPixmap に変換してメモリに固定してから一時ファイルを削除する。
+            # QIcon(_tmp_path) のまま返すと Windows 以外で削除後に
+            # アイコンデータが失われる可能性があるため。
+            _px = QPixmap(_tmp_path)
+            icon = QIcon(_px) if not _px.isNull() else QIcon()
         finally:
             try:
                 _os.unlink(_tmp_path)
             except Exception:
                 pass
+        return icon
     except Exception:
         return QIcon()
 
@@ -207,16 +962,71 @@ RIGHT_PANEL_MIN_META_HEIGHT = 220
 SUPPORTED_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif"]
 
 SORT_KEYS = [
-    ("name",    "名前"),
-    ("date",    "更新日時"),
-    ("cdate",   "作成日時"),
-    ("size",    "サイズ"),
-    ("imgsize", "画像サイズ"),
-    ("path",    "フォルダー"),
-    ("random",  "ランダム"),
+    ("name",    T("名前")),
+    ("date",    T("更新日時")),
+    ("cdate",   T("作成日時")),
+    ("size",    T("サイズ")),
+    ("imgsize", T("画像サイズ")),
+    ("path",    T("フォルダー")),
+    ("random",  T("ランダム")),
 ]
 SORT_KEY_LABELS = {k: v for k, v in SORT_KEYS}
 SORT_LABEL_KEYS = {v: k for k, v in SORT_KEYS}
+
+# ── モデル系統（チェックポイントの大括り）─────────────────────────────────
+# key: 内部ID / value: プルダウン表示名。判定は classify_base_model()。
+# ※ プルダウン表示時は「実在する系統のみ」を _refresh_base_model_filter() が絞り込む。
+BASE_MODEL_GROUPS = [
+    ("",            T("全て")),
+    ("anima",       "Anima"),
+    ("illustrious", "Illustrious"),
+    ("noobai",      "NoobAI"),
+    ("pony",        "Pony"),
+    ("qwen",        "Qwen"),
+    ("sdxl",        "SDXL"),
+    ("flux",        "Flux"),
+    ("minimax",     "MiniMax"),
+    ("other",       T("その他")),
+]
+
+def classify_base_model(model: str) -> str:
+    """モデル名から系統IDを判定する。空文字は空を返す。
+    判定順序が優先度になる（例: smoothMixNoobai_ponyV3 → pony）。
+    """
+    n = (model or "").lower()
+    if not n.strip():
+        return ""
+    if "anima" in n:
+        return "anima"
+    if "illustrious" in n or "illust" in n or "ilustrious" in n or "ilxl" in n:
+        return "illustrious"
+    if "pony" in n:
+        return "pony"
+    if "noobai" in n or "noob" in n:
+        return "noobai"
+    if "minimax" in n or "mini_max" in n or "mini max" in n:
+        return "minimax"
+    if "qwen" in n:
+        return "qwen"
+    if "flux" in n:
+        return "flux"
+    if "sdxl" in n or "sd-xl" in n or "sd_xl" in n or "stable-diffusion-xl" in n:
+        return "sdxl"
+    return "other"
+
+# ── 系統バッジ（サムネイルのファイル名左に表示）─────────────────────────────
+# key: classify_base_model() の戻り値 / value: (3文字略称, 背景色)
+LINEAGE_BADGES = {
+    "anima":       ("ani", "#e67e22"),
+    "illustrious": ("ill", "#3498db"),
+    "noobai":      ("nai", "#27ae60"),
+    "pony":        ("pon", "#9b59b6"),
+    "qwen":        ("qwn", "#1abc9c"),
+    "sdxl":        ("sdx", "#e74c3c"),
+    "flux":        ("flx", "#e91e63"),
+    "minimax":     ("mmx", "#f39c12"),
+    "other":       ("etc", "#7f8c8d"),
+}
 
 
 def get_default_image_folder() -> str:
@@ -267,10 +1077,10 @@ def import_logo_as_webp(source_path: str, stem_hint: str = "") -> str:
     既に `LOGO_DIR` 配下の `.webp` であれば、そのまま返す。
     """
     if not source_path:
-        raise FileNotFoundError("ロゴ画像が指定されていません")
+        raise FileNotFoundError(T("ロゴ画像が指定されていません"))
     src = Path(source_path)
     if not src.is_file():
-        raise FileNotFoundError(f"ロゴ画像が見つかりません: {source_path}")
+        raise FileNotFoundError(f"{Te('ロゴ画像が見つかりません: ')}{source_path}")
     logo_dir = get_logo_dir()
 
     try:
@@ -440,8 +1250,9 @@ QMenu::separator {{
 QToolBar {{
     background: {PAL['bg2']};
     border: none;
+    border-bottom: 1px solid {PAL['border']};
     spacing: 2px;
-    padding: 3px 6px;
+    padding: 0px;
 }}
 QStatusBar {{
     background: {PAL['bg0']};
@@ -741,27 +1552,49 @@ def _normalize_path(path: str) -> str:
     except Exception:
         return path
 
+def _atomic_write_json(target: Path, d: dict) -> bool:
+    """JSON を一時ファイル経由で差し替える（途中で落ちても元の内容が残る）。
+
+    write_text の直書きは保存中にクラッシュ／ディスク満杯で 0 バイトになり、
+    settings.json と ratings.json（★評価の実体）を失うと復旧できない。
+    メタキャッシュが既に mkstemp + os.replace を使っているので揃える。
+    """
+    import tempfile as _tf
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _fd, _tmp = _tf.mkstemp(dir=str(target.parent), suffix=".tmp.json")
+        try:
+            with os.fdopen(_fd, "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False, indent=2)
+            os.replace(_tmp, target)
+            return True
+        except Exception:
+            try: os.unlink(_tmp)
+            except OSError: pass
+            raise
+    except Exception as e:
+        print(f"{target.name}{Te(' の保存に失敗: ')}{e}")
+        return False
+
 def load_cfg() -> dict:
     try: return json.loads(SETTINGS_FILE.read_text("utf-8"))
-    except: return {}
+    except Exception: return {}
 
 def save_cfg(d: dict):
-    try: SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2), "utf-8")
-    except: pass
+    _atomic_write_json(SETTINGS_FILE, d)
 
 def load_ratings() -> dict:
     try: return json.loads(RATINGS_FILE.read_text("utf-8"))
-    except: return {}
+    except Exception: return {}
 
 def save_ratings(d: dict):
-    try: RATINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2), "utf-8")
-    except: pass
+    _atomic_write_json(RATINGS_FILE, d)
 
 def load_quality_cache() -> dict:
     try:
         raw = json.loads(QUALITY_CACHE_FILE.read_text("utf-8"))
         return raw if isinstance(raw, dict) else {}
-    except:
+    except Exception:
         return {}
 
 # ── PNG / 画像メタ ──────────────────────────────────────────────────────────
@@ -836,6 +1669,189 @@ def tags_match(tags: list[str], queries: list[str], require_all: bool = False) -
         return False
     hits = [any(q in t for t in norm_tags) for q in queries]
     return all(hits) if require_all else any(hits)
+
+# ── 詳細検索 (v2.10) ───────────────────────────────────────────────────────
+# 検索バーの照合対象スコープ。デフォルトは「タグ + ファイル名」= 従来のタグ検索＋ファイル名。
+DEFAULT_SEARCH_SCOPE = {
+    "tags":     True,    # プロンプト / ネガティブ / LoRA名
+    "filename": True,    # ファイル名（拡張子あり・なしどちらでもヒット）
+    "model":    False,   # チェックポイント名
+    "params":   False,   # Sampler / Steps / CFG / 解像度 / 日時 / Seed
+    "raw":      False,   # 元のパラメータ文字列全体
+}
+
+# 詳細検索パネルの追加条件（このうち1つでも有効ならフィルタ再実行の対象になる）
+ADV_DEFAULT = {
+    "scope":     dict(DEFAULT_SEARCH_SCOPE),
+    "regex":     False,
+    "date_from": "",      # "YYYY-MM-DD"
+    "date_to":   "",      # "YYYY-MM-DD"
+    "res_min":   0,       # 短辺 px / 0 = 指定なし
+    "res_max":   0,
+    "size_min":  0.0,     # MB / 0 = 指定なし
+    "size_max":  0.0,
+    "sampler":   "",
+    "steps_min": 0,
+    "steps_max": 0,
+    "cfg_min":   0.0,
+    "cfg_max":   0.0,
+}
+
+def adv_has_condition(adv: dict | None) -> bool:
+    """詳細パネル側の追加条件（範囲・個別欄）が1つでも設定されているか。"""
+    if not adv:
+        return False
+    for k in ("date_from", "date_to", "sampler"):
+        if str(adv.get(k, "") or "").strip():
+            return True
+    for k in ("res_min", "res_max", "steps_min", "steps_max"):
+        try:
+            if float(adv.get(k, 0) or 0):
+                return True
+        except (TypeError, ValueError):
+            return True
+    for k in ("size_min", "size_max", "cfg_min", "cfg_max"):
+        try:
+            if float(adv.get(k, 0) or 0):
+                return True
+        except (TypeError, ValueError):
+            return True
+    return False
+
+def norm_date_bound(text: str, is_end: bool = False) -> str:
+    """詳細パネルの日付入力を "YYYY-MM-DD" に正規化する。解釈できなければ ""。
+
+    meta の date は "YYYY-MM-DD HH:MM" なので、従来は素の文字列比較だった。
+    そのため "2026/7/15" や "20260715" は比較され続けて**黙って全除外**になり、
+    "1/5" のような入力は**黙って全通過**した（実測で両方再現）。ここで正規化し、
+    変換できない入力だけは何もしない（呼び出し側が警告を出す）。
+    """
+    t = str(text or "").strip()
+    if not t:
+        return ""
+    t = re.sub(T(r"[年月]"), "-", t)
+    t = re.sub(T(r"\s*[日]"), "", t)
+    t = t.replace(".", "-").replace("/", "-").replace(" ", "-")
+    t = re.sub(r"-+", "-", t).strip("-")
+    if re.fullmatch(r"\d{8}", t):                      # 20260715
+        t = f"{t[:4]}-{t[4:6]}-{t[6:]}"
+    parts = t.split("-")
+    try:
+        if len(parts[0]) != 4 or not parts[0].isdigit():
+            return ""                             # 年は4桁のみ ("1/5" を年1として拾わない)
+        y = int(parts[0])
+        if len(parts) == 1:                             # 2026 だけ
+            if not 1 <= y <= 9999:
+                return ""
+            return f"{y:04d}-12-31" if is_end else f"{y:04d}-01-01"
+        m = int(parts[1])
+        if not 1 <= m <= 12:
+            return ""
+        if len(parts) == 2:                             # 2026-7（月指定）
+            if is_end:
+                last = (datetime(y + 1, 1, 1) if m == 12
+                        else datetime(y, m + 1, 1)) - timedelta(days=1)
+                return f"{y:04d}-{m:02d}-{last.day:02d}"
+            return f"{y:04d}-{m:02d}-01"
+        d = int(parts[2])
+        datetime(y, m, d)                               # 存在チェック
+        return f"{y:04d}-{m:02d}-{d:02d}"
+    except (ValueError, TypeError, IndexError):
+        return ""
+
+def parse_search_query(query: str) -> dict:
+    """検索クエリを解析する。
+
+    - カンマ / 、 / 改行区切りで語を分割（従来の split_tag_query 互換）
+    - "..." で囲んだ語は完全一致フレーズ扱い
+    - - で始まる語は除外語扱い（ヒットした画像を除外）
+
+    戻り値: {"terms": [...], "phrases": [...], "excludes": [...]}（いずれも norm_tag 済み）
+    """
+    out = {"terms": [], "phrases": [], "excludes": []}
+    if not query or not query.strip():
+        return out
+    seen = {"terms": set(), "phrases": set(), "excludes": set()}
+    for part in re.findall(r'"[^"]*"|[^,、\n]+', query):
+        raw = part.strip()
+        if not raw:
+            continue
+        if len(raw) >= 2 and raw.startswith('"') and raw.endswith('"'):
+            bucket, body = "phrases", raw[1:-1]
+        elif raw.startswith("-") and len(raw) > 1:
+            bucket, body = "excludes", raw[1:]
+        else:
+            bucket, body = "terms", raw
+        q = norm_tag(body)
+        if not q or q in seen[bucket]:
+            continue
+        seen[bucket].add(q)
+        out[bucket].append(q)
+    return out
+
+def build_search_haystack(path: str, meta: dict, scope: dict) -> list[str]:
+    """スコープ設定に従って1枚分の検索対象文字列を組み立てる（正規化前）。"""
+    items: list[str] = []
+    if scope.get("tags", True):
+        items += tag_list(meta.get("prompt", ""))
+        items += tag_list(meta.get("negative", ""))
+        items += list(meta.get("loras", []))
+    if scope.get("filename"):
+        base = os.path.basename(path)
+        items.append(base)
+        stem = os.path.splitext(base)[0]
+        if stem != base:
+            items.append(stem)
+    if scope.get("model"):
+        items.append(str(meta.get("model", "") or ""))
+    if scope.get("params"):
+        w = str(meta.get("width", "") or "")
+        h = str(meta.get("height", "") or "")
+        items += [str(meta.get("sampler", "") or ""),
+                  str(meta.get("param_line", "") or ""),
+                  f"{w}x{h}" if w and h else "",
+                  str(meta.get("date", "") or ""),
+                  str(meta.get("seed", "") or ""),
+                  str(meta.get("steps", "") or ""),
+                  str(meta.get("cfg", "") or "")]
+    if scope.get("raw"):
+        items.append(str(meta.get("raw", "") or ""))
+    return [s for s in items if s and str(s).strip()]
+
+def search_haystack_match(norm_hay: list[str], parsed: dict, require_all: bool,
+                          regex: "re.Pattern | None" = None,
+                          raw_hay: "list[str] | None" = None) -> bool:
+    """正規化済みハイスタックに対するクエリ判定（ワーカースレッドから呼ぶ）。
+
+    ⚠ 正規表現モードだけ別扱い: 正規化は `_` を空白に置き換えるため、`cat_ears` のような
+    danbooru 記法の式は正規化後文字列では絶対にヒットしない。よって正規表現は
+    **正規化前の原文**にも照合する（`cat_ears` と `cat ears` の両方が機能する）。
+    """
+    if not norm_hay:
+        return False
+    joined = ", ".join(norm_hay)
+    for q in parsed.get("excludes", ()):
+        if any(q in t for t in norm_hay):
+            return False
+    if regex is not None:
+        if regex.search(joined):
+            return True
+        if raw_hay:
+            if regex.search(", ".join(raw_hay)):
+                return True
+            return any(bool(regex.search(t)) for t in raw_hay if t)
+        return False
+    terms = parsed.get("terms", ())
+    phrases = parsed.get("phrases", ())
+    if not terms and not phrases:
+        return True
+    checks = [any(q in t for t in norm_hay) for q in terms]
+    for q in phrases:
+        # フレーズは1項目と完全一致。単語を含む複数語フレーズのみ連結文字列でも許容する
+        # （例: "1girl, blue hair" のようにタグをまたぐ指定を拾えるようにするため）。
+        checks.append(any(q == t for t in norm_hay) or (" " in q and q in joined))
+    return all(checks) if require_all else any(checks)
+
 
 def dedup_tags(text: str):
     if not text.strip(): return text, 0
@@ -934,9 +1950,71 @@ def _extract_raw_from_exif(img) -> str:
     return raw
 
 
+_MAX_PNG_CHUNK = 64 * 1024 * 1024  # チャンク長上限 (64MB) で DoS/OOM 対策
+
+
+def _decode_text_bytes(b: bytes) -> str:
+    """テキストチャンクの中身を UTF-8 優先でデコードする。
+
+    tEXt の仕様は latin-1 だが、A1111/Forge 系は日本語プロンプトを UTF-8 バイトの
+    まま入れる。latin-1 一辺倒だと文字化けするので UTF-8 厳格→失敗時のみ latin-1。
+    """
+    try:
+        return b.decode("utf-8")
+    except UnicodeDecodeError:
+        return b.decode("latin-1", "ignore")
+
+
+def _decode_png_text_chunk(chunk_type: bytes, data: bytes):
+    """tEXt / zTXt / iTXt を (key, value) に分解する。形が崩れていれば None。"""
+    nul = data.find(b"\x00")
+    if nul < 0:
+        return None
+    key = data[:nul].decode("latin-1", "ignore")
+    rest = data[nul + 1:]
+    if chunk_type == b"tEXt":
+        return key, _decode_text_bytes(rest)
+    if chunk_type == b"zTXt":
+        if len(rest) < 2 or rest[0] != 0:      # 圧縮メソッドは 0 (zlib) のみ定義
+            return key, ""
+        try:
+            return key, _decode_text_bytes(zlib.decompress(rest[1:]))
+        except Exception:
+            return key, ""
+    # iTXt: keyword\0 comp_flag comp_method language\0 translated_keyword\0 text
+    if len(rest) < 3:
+        return key, ""
+    comp_flag, comp_method, tail = rest[0], rest[1], rest[2:]
+    nul2 = tail.find(b"\x00")
+    if nul2 < 0:
+        return key, ""
+    tail = tail[nul2 + 1:]
+    nul3 = tail.find(b"\x00")
+    if nul3 < 0:
+        return key, ""
+    text = tail[nul3 + 1:]
+    if comp_flag:
+        if comp_method != 0:
+            return key, ""
+        try:
+            text = zlib.decompress(text)
+        except Exception:
+            return key, ""
+    return key, text.decode("utf-8", "replace")   # iTXt のテキストは UTF-8 必須
+
+
 def _read_png_text_chunks(path: str) -> dict:
-    """PNGのtEXtチャンクをPillow不使用で直接バイナリ読み取りする（高速）。
-    parameters / prompt キーのみ抽出して返す。失敗時は空dict。"""
+    """PNGのテキストチャンクをPillow不使用で直接バイナリ読み取りする（高速）。
+
+    従来は tEXt のみ・IDAT で打ち切りだった。ComfyUI などは **iTXt を IDAT の後**
+    に書くため速い方が拾えず、Pillow 経路（重い／IDAT後を読む前に打ち切られる場合
+    がある）に落ちていた。tEXt/zTXt/iTXt を位置に関係なく辿れるよう、画像データは
+    読まずにシークで飛ばす。失敗時は空dict。
+
+    早期終了は読み手が優先する `parameters` を見つけたときだけで、`prompt` しか
+    無いファイルは IEND まで辿る（`prompt` が先・`parameters` が後 の並びで優先キー
+    を取り逃がさないため）。
+    """
     result = {}
     try:
         with open(path, "rb") as f:
@@ -949,20 +2027,24 @@ def _read_png_text_chunks(path: str) -> dict:
                     break
                 length = int.from_bytes(hdr[:4], "big")
                 chunk_type = hdr[4:8]
-                data = f.read(length)
-                f.read(4)  # CRC
-                if chunk_type == b"tEXt":
+                if length > _MAX_PNG_CHUNK:
+                    f.seek(length, 1); f.read(4); continue
+                if chunk_type in (b"tEXt", b"zTXt", b"iTXt"):
                     try:
-                        nul = data.index(0)
-                        key = data[:nul].decode("latin-1", "ignore")
-                        val = data[nul+1:].decode("latin-1", "ignore")
-                        result[key] = val
-                        if "parameters" in result and "prompt" in result:
-                            break  # 必要なキーが揃ったら早期終了
-                    except Exception:
-                        pass
-                elif chunk_type in (b"IDAT", b"IEND"):
-                    break  # 画像データより後にtEXtは来ない
+                        entry = _decode_png_text_chunk(chunk_type, f.read(length))
+                    finally:
+                        f.read(4)  # CRC
+                    if entry:
+                        key, val = entry
+                        if val and key not in result:
+                            result[key] = val
+                        if "parameters" in result:
+                            break  # 読み手が優先するキーが取れたら以降は不要
+                    continue
+                f.seek(length, 1)
+                f.read(4)  # CRC
+                if chunk_type == b"IEND":
+                    break
     except Exception:
         pass
     return result
@@ -980,7 +2062,7 @@ def parse_meta(path: str) -> dict:
         r["fsize"] = s.st_size
         r["date"] = datetime.fromtimestamp(s.st_mtime).strftime("%Y-%m-%d %H:%M")
     except Exception as e:
-        r["raw"] = f"[ファイル情報取得エラー: {e}]"
+        r["raw"] = f"{Te('[ファイル情報取得エラー: ')}{e}]"
         return r
 
     # ── 画像サイズ取得（QImageReader: ピクセル展開しないため高速）────────
@@ -1018,7 +2100,7 @@ def parse_meta(path: str) -> dict:
 
         r["raw"] = raw
     except Exception as e:
-        r["raw"] = f"[メタ取得エラー: {e}]"
+        r["raw"] = f"{Te('[メタ取得エラー: ')}{e}]"
         return r
 
     if not r["raw"]:
@@ -1057,7 +2139,7 @@ def parse_meta(path: str) -> dict:
             [n for n, _ in _RE_LORA.findall(r["param_line"])]
         ))
     except Exception as e:
-        r["raw"] += f"\n[パラメータ解析エラー: {e}]"
+        r["raw"] += f"{Te('␜n[パラメータ解析エラー: ')}{e}]"
     return r
 
 def rebuild_params(pos: str, neg: str, pl: str) -> str:
@@ -1069,14 +2151,17 @@ def rebuild_params(pos: str, neg: str, pl: str) -> str:
 def save_png_params(src: str, parameters: str):
     shutil.copy2(src, src + ".bak")
     with open(src, "rb") as f: raw = f.read()
-    if not raw.startswith(b"\x89PNG\r\n\x1a\n"): raise ValueError("PNGではありません")
+    if not raw.startswith(b"\x89PNG\r\n\x1a\n"): raise ValueError(T("PNGではありません"))
     def mk(kw, txt):
         d = (kw + "\x00" + txt).encode("latin-1", "replace")
         c = zlib.crc32(b"tEXt" + d) & 0xFFFFFFFF
         return struct.pack(">I", len(d)) + b"tEXt" + d + struct.pack(">I", c)
     out = [b"\x89PNG\r\n\x1a\n"]; p = 8; ins = False
     while p < len(raw):
+        # [v2.05 FIX] S4: チャンク境界チェック
+        if len(raw) - p < 8: break
         ln = struct.unpack(">I", raw[p:p+4])[0]; ct = raw[p+4:p+8]
+        if len(raw) - p < 12 + ln: break
         chunk = raw[p:p+12+ln]; p += 12 + ln
         if ct == b"tEXt":
             kw = chunk[8:8+ln].split(b"\x00", 1)[0].decode("latin-1", "replace")
@@ -1085,135 +2170,142 @@ def save_png_params(src: str, parameters: str):
                 continue
         out.append(chunk)
         if ct == b"IHDR" and not ins: out.append(mk("parameters", parameters)); ins = True
-    with open(src, "wb") as f:
-        for c in out: f.write(c)
+    # アトミック書き込み: 一時ファイルに書いてから os.replace() で入れ替える。
+    # 書き込み中に例外が発生しても元ファイルが破損しない。
+    import tempfile as _tf
+    _dir = os.path.dirname(src) or "."
+    _fd, _tmp = _tf.mkstemp(dir=_dir)
+    try:
+        with os.fdopen(_fd, "wb") as f:
+            for c in out: f.write(c)
+        os.replace(_tmp, src)
+        # [v2.05 FIX] S4: 成功時に .bak を削除
+        try: os.unlink(src + ".bak")
+        except OSError: pass
+    except Exception:
+        try: os.unlink(_tmp)
+        except Exception: pass
+        raise
 
 # ── サムネキャッシュ ──────────────────────────────────────────────────────
-_mem: dict = {}
+# LRU にしている理由: 素の dict + 「挿入順の先頭300件削除」だと、いま見えている
+# サムネイル（＝一番先に挿入されたもの）から捨てられてスクロール毎に再デコードに
+# なる。使われたものを末尾へ回すようにすると、見ている面は落ちない。
+_mem = OrderedDict()
 _mem_lock = threading.Lock()  # _mem の読み書きを保護するロック
+_MEM_MAX = 1200               # 保持件数の上限
+_MEM_EVICT = 200              # 上限超過時に一度で捨てる件数（境界で震動させない余裕）
+
+
+def _mem_get(k: str):
+    """LRU ヒットなら使った順に末尾へ回して値を返す。無ければ None。
+
+    別スレッド（FullViewer の回転/削除）が同じキーを消す競合では `move_to_end` が
+    KeyError を投げるため、ロック内でまとめて握りつぶす（＝ミスとして扱い再デコード）。
+    """
+    with _mem_lock:
+        try:
+            _mem.move_to_end(k)
+            return _mem[k]
+        except KeyError:
+            return None
+
+
+def _mem_put(k: str, image) -> None:
+    """値を入れて末尾（新側）に置く。上限を超えたら古い方（＝未使用）から一括で捨てる。"""
+    with _mem_lock:
+        _mem[k] = image
+        _mem.move_to_end(k)
+        if len(_mem) > _MEM_MAX:
+            keep_to = max(1, _MEM_MAX - _MEM_EVICT)  # 境界で一々捨てるより一括の方が安い
+            while len(_mem) > keep_to:
+                oldest = next(iter(_mem))
+                if oldest == k:      # 自分だけが残っている状態での自己削除を防ぐ
+                    break
+                del _mem[oldest]
+
 
 def _cache_key(path: str, size: int) -> Path:
     try: mt = f"{os.path.getmtime(path):.0f}"
-    except: mt = "0"
+    except Exception: mt = "0"
     h = hashlib.md5(f"{path}:{size}:{mt}".encode()).hexdigest()
     return CACHE_DIR / f"{h}.raw"
 
 def load_thumb_image(path: str, size: int) -> QImage | None:
     k = f"{path}:{size}"
-    with _mem_lock:
-        if k in _mem:
-            cached = _mem[k]
-            if isinstance(cached, QImage):
-                return cached
-            if isinstance(cached, QPixmap):
-                return cached.toImage()
-            return None
+    t0 = time.perf_counter()
+    cached = _mem_get(k)
+    if cached is not None:
+        _record_load("thumb_mem", t0)
+        if isinstance(cached, QImage):
+            return cached
+        if isinstance(cached, QPixmap):
+            return cached.toImage()
+        return None
     ck = _cache_key(path, size)
+    qi = None
     try:
-        if ck.exists():
-            raw = ck.read_bytes()
-            if raw[:4] == b"RAWX":
-                # ヘッダー構造 (v1.86改訂):
-                #   [0:4]  = b"RAWX"
-                #   [4:6]  = width  (uint16 LE)
-                #   [6:8]  = height (uint16 LE)
-                #   [8]    = channels (3=RGB, 4=RGBA)
-                #   [9:11] = bytesPerLine (uint16 LE)  ← v1.86追加 (旧形式=0でフォールバック)
-                #   [11:]  = raw pixel data (stride込み)
-                # ⚠ 旧形式(9バイトヘッダー)との後方互換: bpl=0 なら w*ch で代替
-                w   = int.from_bytes(raw[4:6], "little")
-                h   = int.from_bytes(raw[6:8], "little")
-                ch  = raw[8]
-                bpl = int.from_bytes(raw[9:11], "little") if len(raw) > 11 else 0
+        with ck.open("rb") as cache:
+            raw = cache.read(11 + (size * 4 + 3) * size + 1)
+        if len(raw) >= 11 and raw[:4] == b"RAWX":
+            w = int.from_bytes(raw[4:6], "little")
+            h = int.from_bytes(raw[6:8], "little")
+            ch = raw[8]
+            bpl = int.from_bytes(raw[9:11], "little")
+            if (0 < w <= size and 0 < h <= size and ch in (3, 4)
+                    and w * ch <= bpl <= w * ch + 3 and len(raw) == 11 + bpl * h):
                 fmt = QImage.Format.Format_RGB888 if ch == 3 else QImage.Format.Format_RGBA8888
-                img_data = raw[11:] if bpl > 0 else raw[9:]
-                bpl = bpl if bpl > 0 else w * ch
-                qi  = QImage(img_data, w, h, bpl, fmt).copy()
-            else:
-                d = pickle.loads(raw)
-                pil = Image.frombytes(d["mode"], d["size"], d["data"])
-                qi = pil_to_qimage(pil)
-        else:
-            qi = None
+                image = QImage(raw[11:], w, h, bpl, fmt).copy()
+                if not image.isNull():
+                    qi = image
+                    _record_load("thumb_disk", t0)
+    except OSError:
+        pass
 
-            # ── 優先: QImageReader によるネイティブ縮小読み込み ────────────
-            # Qt 内蔵デコーダを使うため JPEG のデコード段階でダウンサンプリングが
-            # 行われ、Pillow より高速かつ省メモリ。
-            # ※ QPixmap はバックグラウンドスレッドで作成不可（Qt規約）なので
-            #    QImage まで生成し、QPixmap.fromImage() は共通パスで実施する。
+    try:
+        if qi is None:
             reader = QImageReader(path)
-            reader.setAutoTransform(True)   # EXIF回転を自動適用
+            reader.setAutoTransform(True)
             if reader.canRead():
                 orig = reader.size()
                 if orig.isValid() and orig.width() > 0 and orig.height() > 0:
                     ow, oh = orig.width(), orig.height()
                     if ow > size or oh > size:
                         ratio = min(size / ow, size / oh)
-                        reader.setScaledSize(QSize(int(ow * ratio), int(oh * ratio)))
-                qimg = reader.read()
-                if not qimg.isNull():
-                    # アルファ有無に応じてフォーマット統一
-                    if qimg.hasAlphaChannel():
-                        qi = qimg.convertToFormat(QImage.Format.Format_RGBA8888).copy()
-                    else:
-                        qi = qimg.convertToFormat(QImage.Format.Format_RGB888).copy()
+                        reader.setScaledSize(QSize(max(1, int(ow * ratio)), max(1, int(oh * ratio))))
+                image = reader.read()
+                if not image.isNull():
+                    fmt = QImage.Format.Format_RGBA8888 if image.hasAlphaChannel() else QImage.Format.Format_RGB888
+                    qi = image.convertToFormat(fmt)
 
-                    # キャッシュをバックグラウンドで書き込み（QRunnable 利用）
-                    class _SaveQImg(QRunnable):
-                        def __init__(self, p, qi):
-                            super().__init__(); self.p = p; self.qi = qi
-                        def run(self):
-                            try:
-                                ch  = 4 if self.qi.hasAlphaChannel() else 3
-                                bpl = self.qi.bytesPerLine()  # ⚠ stride必須
-                                header = (b"RAWX"
-                                          + self.qi.width().to_bytes(2, "little")
-                                          + self.qi.height().to_bytes(2, "little")
-                                          + bytes([ch])
-                                          + bpl.to_bytes(2, "little"))  # v1.86追加
-                                self.p.write_bytes(header + bytes(self.qi.constBits()))
-                            except: pass
-                    QThreadPool.globalInstance().start(_SaveQImg(ck, qi.copy()))
-
-            # ── フォールバック: Pillow（QImageReader が対応しない形式用）────
             if qi is None:
-                pil = Image.open(path)
-                ext = os.path.splitext(path)[1].lower()
-                if ext in (".jpg", ".jpeg"):
-                    try:
+                with Image.open(path) as pil:
+                    if pil.format == "JPEG":
                         pil.draft("RGB", (size, size))
-                        pil = Image.open(path)
-                        pil.draft("RGB", (size, size))
-                    except Exception:
-                        pass
-                # BILINEAR: BICUBIC より軽量で、サムネサイズでは品質差が小さい
-                pil.thumbnail((size, size), Image.BILINEAR)
-                qi = pil_to_qimage(pil)
+                    pil.thumbnail((size, size), Image.Resampling.BILINEAR)
+                    qi = pil_to_qimage(pil)
+            if qi.isNull():
+                return None
+            if qi.width() > size or qi.height() > size:
+                qi = qi.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                               Qt.TransformationMode.SmoothTransformation)
 
-                class _SavePil(QRunnable):
-                    def __init__(self, p, img):
-                        super().__init__(); self.p = p; self.img = img
-                    def run(self):
-                        try:
-                            ch  = 3 if self.img.mode == "RGB" else 4
-                            bpl = self.img.width * ch  # Pillow tobytes() はパディングなし
-                            header = (b"RAWX"
-                                      + self.img.width.to_bytes(2, "little")
-                                      + self.img.height.to_bytes(2, "little")
-                                      + bytes([ch])
-                                      + bpl.to_bytes(2, "little"))  # v1.86追加
-                            self.p.write_bytes(header + self.img.tobytes())
-                        except:
-                            pass
-                QThreadPool.globalInstance().start(_SavePil(ck, pil))
+            ch = 4 if qi.hasAlphaChannel() else 3
+            header = (b"RAWX" + qi.width().to_bytes(2, "little")
+                      + qi.height().to_bytes(2, "little") + bytes([ch])
+                      + qi.bytesPerLine().to_bytes(2, "little"))
+            cache = QSaveFile(str(ck))
+            if cache.open(QIODevice.OpenModeFlag.WriteOnly):
+                payload = header + bytes(qi.constBits())
+                if cache.write(payload) == len(payload):
+                    cache.commit()
+                else:
+                    cache.cancelWriting()
+            _record_load("thumb_decode", t0)
 
-        if qi is not None:
-            with _mem_lock:
-                if len(_mem) > 1200:
-                    for old in list(_mem)[:300]: del _mem[old]
-                _mem[k] = qi.copy()
+        _mem_put(k, qi.copy())
         return qi
-    except:
+    except Exception:
         return None
 
 def load_thumb(path: str, size: int) -> QPixmap | None:
@@ -1221,7 +2313,7 @@ def load_thumb(path: str, size: int) -> QPixmap | None:
     if qi is None:
         return None
     if isinstance(qi, QImage):
-        return QPixmap.fromImage(qi.copy())
+        return QPixmap.fromImage(qi)          # fromImage 側でコピーされる
     return qi if isinstance(qi, QPixmap) else None
 
 def load_preview_image(path: str, max_w: int, max_h: int) -> QImage | None:
@@ -1229,14 +2321,15 @@ def load_preview_image(path: str, max_w: int, max_h: int) -> QImage | None:
     max_w×max_h に収める。Pillowより高速でメモリ効率が良い（v1.80）。
     キャッシュキーはパスのみ（サイズ違いで増殖しない）。"""
     k = f"__prev__{path}"
-    with _mem_lock:
-        if k in _mem:
-            cached = _mem[k]
-            if isinstance(cached, QImage):
-                return cached
-            if isinstance(cached, QPixmap):
-                return cached.toImage()
-            return None
+    t0 = time.perf_counter()
+    cached = _mem_get(k)
+    if cached is not None:
+        _record_load("preview_mem", t0)
+        if isinstance(cached, QImage):
+            return cached
+        if isinstance(cached, QPixmap):
+            return cached.toImage()
+        return None
     try:
         reader = QImageReader(path)
         reader.setAutoTransform(True)
@@ -1254,30 +2347,37 @@ def load_preview_image(path: str, max_w: int, max_h: int) -> QImage | None:
                     qimg = qimg.convertToFormat(QImage.Format.Format_RGBA8888)
                 else:
                     qimg = qimg.convertToFormat(QImage.Format.Format_RGB888)
-                with _mem_lock:
-                    if len(_mem) > 1200:
-                        for old_k in list(_mem)[:300]: del _mem[old_k]
-                    _mem[k] = qimg.copy()
-                return qimg.copy()
+                # QImage は暗黙共有（COW）なので、キャッシュと戻り値は同一オブジェクトで
+                # 足りる。ここで copy() を重ねると 1600px 相当の memcpy が 2 回になる。
+                _mem_put(k, qimg)
+                _record_load("preview_load", t0)  # v2.06 計測
+                return qimg
 
         # QImageReader未対応フォーマット用 Pillow フォールバック
         pil = Image.open(path)
         pil.thumbnail((1600, 1600), Image.BILINEAR)
         qimg = pil_to_qimage(pil)
-        with _mem_lock:
-            if len(_mem) > 1200:
-                for old_k in list(_mem)[:300]: del _mem[old_k]
-            _mem[k] = qimg.copy()
-        return qimg.copy()
-    except:
+        _mem_put(k, qimg)
+        _record_load("preview_load", t0)  # v2.06 計測
+        return qimg
+    except Exception:
         return None
 
 def load_preview_pixmap(path: str, max_w: int, max_h: int) -> QPixmap | None:
+    """要求ボックスに収めた Pixmap を返す（重複判定ダイアログの 148px アイコン用）。
+
+    キャッシュ実体は `PreviewLoader` と共有する 1600px 版なので、全サイズのまま
+    `fromImage` すると 1枚あたり約20ms（実測）かかる。縮ってから変換する。
+    """
     qi = load_preview_image(path, max_w, max_h)
     if qi is None:
         return None
+    over_w, over_h = qi.width() > max_w, qi.height() > max_h
+    if over_w or over_h:
+        qi = qi.scaled(max_w, max_h, Qt.AspectRatioMode.KeepAspectRatio,
+                       Qt.TransformationMode.SmoothTransformation)
     if isinstance(qi, QImage):
-        return QPixmap.fromImage(qi.copy())
+        return QPixmap.fromImage(qi)          # fromImage 側でコピーされる
     return qi if isinstance(qi, QPixmap) else None
 
 def pil_to_qpixmap(pil_img: Image.Image) -> QPixmap:
@@ -1302,16 +2402,61 @@ def as_pixmap(value):
 def clear_cache():
     with _mem_lock:
         _mem.clear()
-    for f in CACHE_DIR.glob("*.raw"):
-        try: f.unlink()
-        except: pass
+    # 現行形式 *.raw と、v1.x 期の旧形式 *.pkl（2026-03-28 以降まったく書かれていない残骸）を一緒に消す
+    for pat in ("*.raw", "*.pkl"):
+        for f in CACHE_DIR.glob(pat):
+            try: f.unlink()
+            except Exception: pass
+
+# ── ロード統計 (v2.06 計測) ─────────────────────────────────────────────────
+# category -> [count, total_ms, max_ms]。全ワーカースレッドから更新されるためロックで保護。
+_LOAD_STATS: dict = {}
+_stats_lock = threading.Lock()
+
+def _record_load(category: str, t0: float):
+    """load 系処理の所要時間を記録する（ツール→📊 ロード統計 で閲覧）。"""
+    ms = (time.perf_counter() - t0) * 1000.0
+    with _stats_lock:
+        ent = _LOAD_STATS.setdefault(category, [0, 0.0, 0.0])
+        ent[0] += 1
+        ent[1] += ms
+        if ms > ent[2]:
+            ent[2] = ms
+
+# ── ロゴpixmapキャッシュ (v2.06 P2) ────────────────────────────────────────
+# オーバーレイ合成で表示のたびにロゴPNGをディスクからデコードし直していたのを
+# パス+mtime キーでキャッシュする。QPixmap は GUI スレッドからのみ扱う
+# （_compose_overlay の呼び出し元はすべてシグナル経由でメインスレッド）。
+_logo_px_cache: dict = {}   # {logo_path: (mtime, QPixmap)}
+_logo_px_lock = threading.Lock()
+
+def _get_logo_pixmap(logo_path: str) -> QPixmap | None:
+    """ロゴファイルの QPixmap をキャッシュ付きで返す。読めなければ None。"""
+    try:
+        mt = os.path.getmtime(logo_path)
+    except OSError:
+        return None
+    with _logo_px_lock:
+        ent = _logo_px_cache.get(logo_path)
+        if ent is not None and ent[0] == mt:
+            return ent[1]
+    px = QPixmap(logo_path)
+    if px.isNull():
+        return None
+    with _logo_px_lock:
+        if len(_logo_px_cache) > 64:
+            for old_k in list(_logo_px_cache)[:16]:
+                _logo_px_cache.pop(old_k, None)
+        _logo_px_cache[logo_path] = (mt, px)
+    return px
+
 
 def avg_hash(path: str, size: int = 8) -> int | None:
     try:
         img = Image.open(path).convert("L").resize((size, size), Image.LANCZOS)
         px = list(img.getdata()); avg = sum(px) / len(px)
         return sum(1 << i for i, p in enumerate(px) if p >= avg)
-    except: return None
+    except Exception: return None
 
 def hamming(a: int, b: int) -> int:
     return bin(a ^ b).count("1")
@@ -1385,7 +2530,7 @@ class _DeleteConfirmDialog(QDialog):
         root.addLayout(icon_row)
 
         # ヒント
-        hint = QLabel("←→/Tab でボタン選択　　Enter/Y = はい　　N/Esc = いいえ")
+        hint = QLabel(T("←→/Tab でボタン選択　　Enter/Y = はい　　N/Esc = いいえ"))
         hint.setStyleSheet(f"color: {PAL['fg3']}; font-size: 8pt;")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(hint)
@@ -1394,13 +2539,13 @@ class _DeleteConfirmDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
 
-        self._yes_btn = QPushButton("はい(Y)")
+        self._yes_btn = QPushButton(T("はい(Y)"))
         self._yes_btn.setFixedHeight(32)
         self._yes_btn.setMinimumWidth(100)
         self._yes_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._yes_btn.clicked.connect(self._accept)
 
-        self._no_btn = QPushButton("いいえ(N)")
+        self._no_btn = QPushButton(T("いいえ(N)"))
         self._no_btn.setFixedHeight(32)
         self._no_btn.setMinimumWidth(100)
         self._no_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -1531,8 +2676,11 @@ class MetaCache:
     _MAX_META_ENTRIES を超えた場合は古い 20% のエントリを evict する（LRU近似）。
     save_to_disk / load_from_disk でアプリ再起動をまたいでキャッシュを永続化する（v2.02）。
     """
-    _MAX_META_ENTRIES = 50000  # この件数を超えたら古いエントリを削除（3万枚対応）
-    _CACHE_FILE = APP_DIR / "meta_cache.pkl"
+    _MAX_META_ENTRIES = 50000
+    # [v2.05 FIX] S2: pickle → JSON (RCE リスク回避)
+    # [v2.05.1 OPT] S2: orjson で高速シリアライズ (フォールバック付き)
+    _CACHE_FILE = APP_DIR / "meta_cache.json"
+    _LEGACY_CACHE_FILE = APP_DIR / "meta_cache.pkl"
 
     def __init__(self):
         self._d: dict = {}
@@ -1541,30 +2689,65 @@ class MetaCache:
 
     def load_from_disk(self):
         """アプリ起動時にディスクからメタデータを読み込む"""
+        # [v2.05.1 OPT] S2: orjson で高速読み込み
+        try:
+            import orjson as _json_mod
+        except ImportError:
+            _json_mod = None
         if self._CACHE_FILE.exists():
             try:
-                with open(self._CACHE_FILE, "rb") as f:
+                raw = self._CACHE_FILE.read_bytes()
+                if _json_mod:
+                    data = _json_mod.loads(raw)
+                else:
+                    import json as _stdlib_json
+                    data = _stdlib_json.loads(raw.decode("utf-8"))
+                if isinstance(data, dict):
+                    with self._lock:
+                        self._d = data
+            except (OSError, ValueError) as e:
+                print(f"{Te('メタキャッシュの読み込みに失敗: ')}{e}")
+        elif self._LEGACY_CACHE_FILE.exists():
+            # 旧 pickle 形式からの移行
+            try:
+                with open(self._LEGACY_CACHE_FILE, "rb") as f:
                     data = pickle.load(f)
                     if isinstance(data, dict):
                         with self._lock:
                             self._d = data
+                self._LEGACY_CACHE_FILE.unlink(missing_ok=True)
+                print(T("メタキャッシュを JSON 形式へ移行しました"))
             except Exception as e:
-                print(f"メタキャッシュの読み込みに失敗: {e}")
+                print(f"{Te('旧メタキャッシュの移行に失敗: ')}{e}")
 
     def save_to_disk(self):
         """アプリ終了時にメタデータを永続化する"""
         with self._lock:
-            # 容量オーバー時は古いものから削除
             if len(self._d) > self._MAX_META_ENTRIES:
                 keys = list(self._d.keys())
                 for k in keys[:len(self._d) - self._MAX_META_ENTRIES]:
                     self._d.pop(k, None)
+            # [v2.05.1 OPT] S2: orjson + アトミック書き込み
+            try:
+                import orjson as _json_mod
+                payload = _json_mod.dumps(self._d, option=_json_mod.OPT_NON_STR_KEYS)
+            except ImportError:
+                import json as _stdlib_json
+                payload = _stdlib_json.dumps(self._d, ensure_ascii=False).encode("utf-8")
             try:
                 APP_DIR.mkdir(parents=True, exist_ok=True)
-                with open(self._CACHE_FILE, "wb") as f:
-                    pickle.dump(self._d, f)
+                import tempfile as _tf
+                _fd, _tmp = _tf.mkstemp(dir=APP_DIR, suffix=".json")
+                try:
+                    with os.fdopen(_fd, "wb") as f:
+                        f.write(payload)
+                    os.replace(_tmp, self._CACHE_FILE)
+                except Exception:
+                    try: os.unlink(_tmp)
+                    except OSError: pass
+                    raise
             except Exception as e:
-                print(f"メタキャッシュの保存に失敗: {e}")
+                print(f"{Te('メタキャッシュの保存に失敗: ')}{e}")
 
     def get(self, p: str) -> dict:
         with self._lock:
@@ -1595,6 +2778,22 @@ class MetaCache:
         LoRA分析ワーカー等が meta_snap を作成する際にはこれを使う。"""
         with self._lock:
             return dict(self._d)
+
+    def has(self, p: str) -> bool:
+        """キャッシュにエントリが存在するか確認する（I/O なし）。"""
+        with self._lock:
+            return p in self._d
+
+    def peek(self, p: str) -> dict | None:
+        """キャッシュを読み取り専用で参照する（ロック済み・I/O なし）。
+        キャッシュミスの場合は None を返す（get() と異なり parse_meta() を呼ばない）。"""
+        with self._lock:
+            return dict(self._d[p]) if p in self._d else None
+
+    def keys(self) -> list:
+        """キャッシュ済みパスの一覧を返す（ロック済み）。"""
+        with self._lock:
+            return list(self._d.keys())
 
     def invalidate(self, p: str):
         with self._lock:
@@ -1817,10 +3016,10 @@ class _ErrorDialog(QDialog):
         icon_row.addWidget(msg_te, 1)
         root.addLayout(icon_row)
         btn_row = QHBoxLayout()
-        copy_btn = QPushButton("📋 コピー")
-        copy_btn.setToolTip("エラーメッセージをクリップボードにコピー")
+        copy_btn = QPushButton(T("📋 コピー"))
+        copy_btn.setToolTip(T("エラーメッセージをクリップボードにコピー"))
         copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(message))
-        close_btn = QPushButton("閉じる")
+        close_btn = QPushButton(T("閉じる"))
         close_btn.setDefault(True)
         close_btn.clicked.connect(self.accept)
         btn_row.addWidget(copy_btn)
@@ -1845,7 +3044,7 @@ def delete_file(path: str, permanent: bool = False) -> tuple[bool, str]:
     path = _normalize_path(path)
     try:
         if not os.path.exists(path):
-            return False, f"ファイルが見つかりません: {path}"
+            return False, f"{Te('ファイルが見つかりません: ')}{path}"
         if permanent:
             os.remove(path)
         elif HAS_SEND2TRASH:
@@ -1883,7 +3082,7 @@ def civitai_open_lora(lora_name: str, lora_folder: str = ""):
                                 url = f"https://civitai.com/models/{mid}"
                                 if vid: url += f"?modelVersionId={vid}"
                                 webbrowser.open(url); return
-                        except: pass
+                        except Exception: pass
         clean = re.sub(r"[\s_]+", " ", lora_name.split("(")[0]).strip()
         q = urllib.parse.quote(clean)
         url = f"https://civitai.com/api/v1/models?limit=10&query={q}&types=LORA&sort=Highest+Rated"
@@ -1907,7 +3106,7 @@ def civitai_open_lora(lora_name: str, lora_folder: str = ""):
                 webbrowser.open(f"https://civitai.com/models/{best['id']}/{slug}")
             else:
                 webbrowser.open(f"https://civitai.com/search/models?query={q}")
-        except:
+        except Exception:
             webbrowser.open(f"https://civitai.com/search/models?query={urllib.parse.quote(clean)}")
     threading.Thread(target=_worker, daemon=True).start()
 
@@ -1947,7 +3146,7 @@ class ScanWorker(QThread):
                                     try:
                                         st = entry.stat(follow_symlinks=False)
                                         stats[p] = (st.st_mtime, st.st_ctime, st.st_size)
-                                    except:
+                                    except Exception:
                                         stats[p] = (0, 0, 0)
                 except Exception:
                     pass
@@ -1964,7 +3163,7 @@ class ScanWorker(QThread):
                                 try:
                                     st = entry.stat(follow_symlinks=False)
                                     stats[p] = (st.st_mtime, st.st_ctime, st.st_size)
-                                except:
+                                except Exception:
                                     stats[p] = (0, 0, 0)
             except Exception:
                 pass
@@ -2015,9 +3214,8 @@ class PreloadWorker(QThread):
 
         def _process(p: str):
             if self._cancelled: return
-            if p not in META._d:
-                try: META.get(p)
-                except: pass
+            try: META.get(p)
+            except Exception: pass
             nonlocal completed
             with prog_lock:
                 completed += 1
@@ -2047,21 +3245,126 @@ class FilterWorker(QThread):
     """フィルタ・ソートスレッド"""
     finished = Signal(list)
 
-    def __init__(self, all_paths, tq, tag_and, mq, sq, rfilter, qfilter, ratings, quality_cache, sort_key, sort_rev, meta_snap, stats_dict=None, parent=None):
+    def __init__(self, all_paths, tq, tag_and, mq, sq, rfilter, qfilter, ratings, quality_cache, sort_key, sort_rev, meta_snap, stats_dict=None, parent=None, bq="", adv=None):
         super().__init__(parent)
         self._paths = all_paths; self._tq = tq; self._mq = mq; self._sq = sq
         self._tag_and = tag_and
         self._rf = rfilter; self._qf = qfilter; self._ratings = ratings; self._quality = quality_cache
         self._key = sort_key; self._rev = sort_rev
         self._meta = meta_snap; self._stats = stats_dict or {}
+        self._bq = bq or ""
+        self._adv = adv or {}
         self._cancelled = False
 
     def cancel(self): self._cancelled = True
 
+    # ── 詳細検索 (v2.10) ─────────────────────────────────────────────────
+    @staticmethod
+    def _num_in_range(val, lo: float, hi: float) -> bool:
+        """数値範囲チェック。値が取得できない画像は範囲指定時に除外する。"""
+        try:
+            v = float(str(val).strip())
+        except (TypeError, ValueError):
+            return False
+        if lo and v < lo:
+            return False
+        if hi and v > hi:
+            return False
+        return True
+
+    def _adv_pass(self, p: str, m: dict, adv: dict) -> bool:
+        """詳細パネルの追加条件（日付/解像度/サイズ/Sampler/Steps/CFG）を評価する。"""
+        if not adv_has_condition(adv):
+            return True
+
+        def _f(key):
+            try:
+                return float(adv.get(key, 0) or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        # ── 日付範囲（meta の date は mtime 由来。無い場合は stat の mtime を使う）──
+        dfrom = str(adv.get("date_from", "") or "").strip()
+        dto = str(adv.get("date_to", "") or "").strip()
+        if dfrom or dto:
+            d = str(m.get("date", "") or "")[:10]
+            if not d:
+                st = self._stats.get(p)
+                if st and st[0]:
+                    d = datetime.fromtimestamp(st[0]).strftime("%Y-%m-%d")
+            if d:
+                if dfrom and d < dfrom:
+                    return False
+                if dto and d > dto:
+                    return False
+
+        # ── 解像度範囲（短辺基準 / 寸法不明は Steps/CFG と同じく除外）──────
+        # ⚠ 旧実装は不明枚を通過させていたが、行のツールチップは「除外されます」と
+        # 明記しており、約束と挙動が逆だった（実データでは寸法 100% 記入なので目立たない）。
+        rmin = int(_f("res_min")); rmax = int(_f("res_max"))
+        if rmin or rmax:
+            try:
+                w = int(m.get("width", 0) or 0)
+                h = int(m.get("height", 0) or 0)
+            except (TypeError, ValueError):
+                w = h = 0
+            if not (w > 0 and h > 0):
+                return False
+            short = w if w < h else h
+            if rmin and short < rmin:
+                return False
+            if rmax and short > rmax:
+                return False
+
+        # ── ファイルサイズ範囲 (MB) ─────────────────────────────────────
+        smin = _f("size_min"); smax = _f("size_max")
+        if smin or smax:
+            st = self._stats.get(p)
+            if st:
+                mb = (st[2] or 0) / 1048576.0
+                if smin and mb < smin:
+                    return False
+                if smax and mb > smax:
+                    return False
+
+        # ── Sampler（部分一致・大文字小文字無視）──────────────────────────
+        sampler = str(adv.get("sampler", "") or "").strip()
+        if sampler:
+            if sampler.lower() not in str(m.get("sampler", "") or "").lower():
+                return False
+
+        # ── Steps / CFG 範囲 ────────────────────────────────────────────
+        stmin = _f("steps_min"); stmax = _f("steps_max")
+        if stmin or stmax:
+            if not self._num_in_range(m.get("steps", ""), stmin, stmax):
+                return False
+        cmin = _f("cfg_min"); cmax = _f("cfg_max")
+        if cmin or cmax:
+            if not self._num_in_range(m.get("cfg", ""), cmin, cmax):
+                return False
+        return True
+
     def run(self):
-        tq = self._tq; mq = self._mq; sq = self._sq; rf = self._rf; qf = self._qf
-        tq_terms = split_tag_query(tq)
-        no_filter = (not tq and not mq and not sq and rf == "all" and qf == "all")
+        tq = self._tq; mq = self._mq; sq = self._sq; rf = self._rf; qf = self._qf; bq = self._bq
+        adv = self._adv or {}
+        scope = dict(DEFAULT_SEARCH_SCOPE)
+        scope.update(adv.get("scope") or {})
+        parsed = parse_search_query(tq)
+        # スコープが1つも選択されていない間はテキスト検索を無効化する
+        use_text = bool(tq) and any(bool(v) for v in scope.values())
+        regex = None
+        if use_text and adv.get("regex"):
+            try:
+                regex = re.compile(tq, re.IGNORECASE)
+            except re.error:
+                regex = None   # 不正な式は通常の部分一致検索へフォールバック
+        needs_meta = bool(
+            mq or sq or bq
+            or (use_text and any(scope.get(k) for k in ("tags", "model", "params", "raw")))
+            or any(adv.get(k) for k in ("res_min", "res_max", "sampler", "steps_min",
+                                       "steps_max", "cfg_min", "cfg_max")))
+        no_filter = (not use_text and not mq and not sq and not bq
+                     and rf == "all" and qf == "all" and not adv_has_condition(adv))
         if no_filter:
             filtered = list(self._paths)
         else:
@@ -2069,25 +3372,27 @@ class FilterWorker(QThread):
             for p in self._paths:
                 if self._cancelled: return
                 m = self._meta.get(p)
-                # ⚠ 同期パース（META.get → Image.open）によるフリーズを完全防止。
-                # 未キャッシュファイルはスキップし、PreloadWorker の進捗に合わせて
-                # _on_preload_progress が定期的に _apply_filter() を再実行することで
-                # シームレスに結果が増えていく設計にする。
                 if m is None:
-                    continue
-                if tq:
-                    search_tags = (
-                        tag_list(m.get("prompt", ""))
-                        + tag_list(m.get("negative", ""))
-                        + list(m.get("loras", []))
-                    )
-                    hit = tags_match(search_tags, tq_terms, self._tag_and)
-                    if not hit: continue
+                    m = META.get(p) if needs_meta else {}
+                    if needs_meta:
+                        self._meta[p] = m
+                if use_text:
+                    hay = build_search_haystack(p, m, scope)
+                    hit = search_haystack_match(
+                        [norm_tag(x) for x in hay], parsed, self._tag_and, regex, hay)
+                    if not hit:
+                        continue
                 if mq and m.get("model") != mq: continue
+                if bq:
+                    if bq == "other":
+                        if classify_base_model(m.get("model", "")) != "other":
+                            continue
+                    elif classify_base_model(m.get("model", "")) != bq:
+                        continue
                 if sq and sq not in str(m.get("seed", "")).strip(): continue
                 if rf != "all":
                     r = self._ratings.get(p, 0)
-                    if rf == "未評価" and r != 0: continue
+                    if rf == T("未評価") and r != 0: continue
                     elif rf == "★5" and r != 5: continue
                     elif rf == "★4+" and r < 4: continue
                     elif rf == "★3+" and r < 3: continue
@@ -2098,6 +3403,8 @@ class FilterWorker(QThread):
                     qlabel = str(qinfo.get("label", "unknown"))
                     if qlabel != qf:
                         continue
+                if not self._adv_pass(p, m, adv):
+                    continue
                 filtered.append(p)
 
         if self._cancelled: return
@@ -2114,13 +3421,16 @@ class FilterWorker(QThread):
         elif key == "size":
             filtered.sort(key=lambda p: stats.get(p, (0, 0, 0))[2], reverse=rev)
         elif key == "imgsize":
-            # Image.open フォールバックは大量ファイル時にフリーズするため廃止
             def _is(p):
+                if self._cancelled:
+                    return 0
                 m = meta.get(p)
-                if m:
-                    try: return int(m.get("width", 0) or 0) * int(m.get("height", 0) or 0)
-                    except: pass
-                return 0
+                if m is None:
+                    m = META.get(p)
+                try:
+                    return int(m.get("width", 0) or 0) * int(m.get("height", 0) or 0)
+                except (TypeError, ValueError):
+                    return 0
             filtered.sort(key=_is, reverse=rev)
         elif key == "random":
             random.shuffle(filtered)
@@ -2223,10 +3533,15 @@ class DuplicateDetectWorker(QThread):
             self.finished.emit([], summary)
             return
 
-        self.progress.emit("重複画像: 完全一致を検出中...")
+        self.progress.emit(T("重複画像: 完全一致を検出中..."))
         size_buckets: dict[int, list[str]] = {}
         for p in existing:
-            size_buckets.setdefault(self._stats.get(p, (0, 0, os.path.getsize(p)))[2], []).append(p)
+            # [v2.05 FIX] T4: os.path.getsize 例外処理
+            try:
+                size = self._stats.get(p, (0, 0, os.path.getsize(p)))[2]
+            except OSError:
+                continue
+            size_buckets.setdefault(size, []).append(p)
 
         groups = []
         consumed = set()
@@ -2248,7 +3563,7 @@ class DuplicateDetectWorker(QThread):
                 dup_paths = sorted(dup_paths)
                 groups.append({
                     "id": gid,
-                    "mode": "完全一致",
+                    "mode": T("完全一致"),
                     "label": digest[:12],
                     "paths": dup_paths,
                 })
@@ -2257,7 +3572,7 @@ class DuplicateDetectWorker(QThread):
                 summary["exact_groups"] += 1
                 summary["duplicate_files"] += len(dup_paths) - 1
 
-        self.progress.emit("重複画像: 類似画像を検出中...")
+        self.progress.emit(T("重複画像: 類似画像を検出中..."))
         remaining = [p for p in existing if p not in consumed]
         buckets: dict[tuple[int, int, int], list[tuple[str, int]]] = {}
         for idx, p in enumerate(remaining, 1):
@@ -2270,7 +3585,7 @@ class DuplicateDetectWorker(QThread):
             key = (max(1, w // 64), max(1, h // 64), ah >> 56)
             buckets.setdefault(key, []).append((p, ah))
             if idx % 300 == 0:
-                self.progress.emit(f"重複画像: 類似ハッシュ計算中... {idx}/{len(remaining)}")
+                self.progress.emit(f"{Te('重複画像: 類似ハッシュ計算中... ')}{idx}/{len(remaining)}")
 
         visited = set()
         for items in buckets.values():
@@ -2294,7 +3609,7 @@ class DuplicateDetectWorker(QThread):
                     grp = sorted(grp)
                     groups.append({
                         "id": gid,
-                        "mode": "類似",
+                        "mode": T("類似"),
                         "label": f"Δ<={self._threshold}",
                         "paths": grp,
                     })
@@ -2303,8 +3618,8 @@ class DuplicateDetectWorker(QThread):
                     summary["similar_groups"] += 1
                     summary["duplicate_files"] += len(grp) - 1
 
-        groups.sort(key=lambda g: (g["mode"] != "完全一致", -len(g["paths"]), g["paths"][0].lower()))
-        self.progress.emit(f"重複画像: {len(groups)}グループを検出")
+        groups.sort(key=lambda g: (g["mode"] != T("完全一致"), -len(g["paths"]), g["paths"][0].lower()))
+        self.progress.emit(f"{Te('重複画像: ')}{len(groups)}{Te('グループを検出')}")
         self.finished.emit(groups, summary)
 
 
@@ -2328,7 +3643,7 @@ class SimilarFindWorker(QThread):
             self.finished.emit([self._base], self._base)
             return
         total = max(1, len(self._paths))
-        self.progress.emit(0, total, "類似画像を検索中...")
+        self.progress.emit(0, total, T("類似画像を検索中..."))
         results = [self._base]
         for idx, p in enumerate(self._paths, 1):
             if self._cancelled:
@@ -2338,7 +3653,7 @@ class SimilarFindWorker(QThread):
                 if h is not None and hamming(base_h, h) <= self._threshold:
                     results.append(p)
             if idx % 200 == 0 or idx == total:
-                self.progress.emit(idx, total, "類似画像を検索中...")
+                self.progress.emit(idx, total, T("類似画像を検索中..."))
         self.finished.emit(results, self._base)
 
 
@@ -2347,11 +3662,12 @@ class ThumbLoader(QRunnable):
     キャンセルフラグ付き。削除済みセルへの配送はグリッド側で無視する。
     """
     class Signals(QObject):
-        loaded = Signal(str, object)
+        loaded = Signal(str, object, int, object)
 
     def __init__(self, path: str, size: int, generation: int):
         super().__init__()
         self.path = path; self.size = size; self.generation = generation
+        self.request_id = object()
         self.signals = ThumbLoader.Signals()
         self.setAutoDelete(True)
         self._cancelled = False
@@ -2362,7 +3678,7 @@ class ThumbLoader(QRunnable):
         if self._cancelled: return
         img = load_thumb_image(self.path, self.size)
         if img is not None and not self._cancelled:
-            self.signals.loaded.emit(self.path, img)
+            self.signals.loaded.emit(self.path, img, self.generation, self.request_id)
 
 
 
@@ -2443,7 +3759,7 @@ class _ScrollRuler(QWidget):
         mid_y = max(18, min(r.height() - 44, knob_y + knob_h // 2 - 18))
         p.drawText(QRect(2, mid_y, 24, 14), Qt.AlignmentFlag.AlignLeft, str(self._start + 1 if self._total else 0))
         p.drawText(QRect(2, mid_y + 12, 24, 14), Qt.AlignmentFlag.AlignLeft, str(self._end if self._total else 0))
-        p.drawText(QRect(2, mid_y + 24, 24, 14), Qt.AlignmentFlag.AlignLeft, f"{visible_count}枚")
+        p.drawText(QRect(2, mid_y + 24, 24, 14), Qt.AlignmentFlag.AlignLeft, f"{visible_count}{Te('枚')}")
         p.end()
 
 
@@ -2477,6 +3793,7 @@ class VirtualGrid(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._paths: list       = []
+        self._pos: dict         = {}         # path -> index（クリック/ナビ毎の list.index 走査を省くため）
         self._thumb_size: int   = 160
         self._selected: str | None = None
         self._multi_sel: set    = set()
@@ -2543,8 +3860,13 @@ class VirtualGrid(QWidget):
     # ════════════════════════════════════════════
     #  公開 API
     # ════════════════════════════════════════════
-    def set_images(self, paths: list):
+    def _set_paths(self, paths: list):
+        """一覧を差し替える唯一の入口（`_pos` を必ず一緒に作り直す）。"""
         self._paths = list(paths)
+        self._pos = {p: i for i, p in enumerate(self._paths)}
+
+    def set_images(self, paths: list):
+        self._set_paths(paths)
         self._selected = None
         self._multi_sel.clear()
         self._pixmap_cache.clear()
@@ -2553,7 +3875,7 @@ class VirtualGrid(QWidget):
 
     def set_images_keep_scroll(self, paths: list):
         yval = self._scroll.verticalScrollBar().value()
-        self._paths = list(paths)
+        self._set_paths(paths)
         valid = set(self._paths)
         if self._selected not in valid:
             self._selected = None
@@ -2568,12 +3890,17 @@ class VirtualGrid(QWidget):
         self._update_ruler()
 
     def set_thumb_size(self, s: int):
+        if s == self._thumb_size:
+            return
         sb = self._scroll.verticalScrollBar()
         old_val = sb.value()
         old_max = max(1, sb.maximum())
         self._thumb_size = s
         with _mem_lock:
-            _mem.clear()
+            # [v2.05 FIX] D6: サムネイル系のみ削除 (FullViewer/preview 保持)
+            for k in list(_mem):
+                if not k.startswith("__"):
+                    del _mem[k]
         self._pixmap_cache.clear()
         self._full_rebuild(reset_scroll=False)
         new_max = sb.maximum()
@@ -2584,17 +3911,18 @@ class VirtualGrid(QWidget):
         self._selected = path
         self._multi_sel.clear()
         self._refresh_cell_colors()
-        self._scroll_to_idx(self._paths.index(path) if path in self._paths else -1)
+        self._scroll_to_idx(self._pos.get(path, -1))
 
     def highlight_multi(self, path: str):
         self._selected = path
         self._refresh_cell_colors()
 
     def select_for_drag(self, path: str):
-        if path not in self._paths:
+        idx = self._pos.get(path, -1)
+        if idx < 0:
             return
         self._selected = path
-        self._last_idx = self._paths.index(path)
+        self._last_idx = idx
         self._multi_sel.clear()
         self._multi_sel.add(path)
         self._refresh_cell_colors()
@@ -2607,8 +3935,8 @@ class VirtualGrid(QWidget):
         self.sel_changed.emit(self._multi_sel)
 
     def range_select(self, path: str):
-        if path not in self._paths: return
-        i2 = self._paths.index(path)
+        i2 = self._pos.get(path, -1)
+        if i2 < 0: return
         i1 = max(0, self._last_idx) if self._last_idx >= 0 else i2
         for p in self._paths[min(i1,i2):max(i1,i2)+1]:
             self._multi_sel.add(p)
@@ -2631,8 +3959,9 @@ class VirtualGrid(QWidget):
         return []
 
     def scroll_to(self, path: str):
-        if path in self._paths:
-            self._scroll_to_idx(self._paths.index(path))
+        idx = self._pos.get(path, -1)
+        if idx >= 0:
+            self._scroll_to_idx(idx)
 
     # ════════════════════════════════════════════
     #  内部: レイアウト計算
@@ -2774,6 +4103,7 @@ class VirtualGrid(QWidget):
             cell.right_clicked.connect(self.image_right_clicked)
             # 選択状態を即反映
             cell.set_selected(path == self._selected, path in self._multi_sel)
+            self._apply_badge(cell)
             self._visible_cells[path] = cell
 
             # ピクスマップがキャッシュにあれば即セット、なければロード
@@ -2800,8 +4130,23 @@ class VirtualGrid(QWidget):
         for path, cell in self._visible_cells.items():
             cell.set_selected(path == self._selected, path in self._multi_sel)
 
-    @Slot(str, object)
-    def _on_thumb_loaded(self, path: str, px):
+    def _apply_badge(self, cell):
+        """セルの系統バッジを META キャッシュから設定する（I/O なし peek 使用）。"""
+        meta = META.peek(cell.path) or {}
+        key = classify_base_model(meta.get("model", ""))
+        text, bg = LINEAGE_BADGES.get(key, ("", None))
+        cell.set_lineage_badge(text, bg)
+
+    def _refresh_cell_badges(self):
+        for cell in self._visible_cells.values():
+            self._apply_badge(cell)
+
+    @Slot(str, object, int, object)
+    def _on_thumb_loaded(self, path: str, px, generation: int, request_id):
+        loader = self._live_loaders.get(path)
+        if (generation != self._generation or loader is None
+                or loader.request_id is not request_id):
+            return
         mw = self.window()
         if isinstance(px, QImage):
             px = QPixmap.fromImage(px)
@@ -2829,7 +4174,6 @@ class VirtualGrid(QWidget):
 
     def _on_resize_settle(self):
         new_cols = self._calc_cols()
-        if new_cols == self._last_cols: return
         self._last_cols = new_cols
         rows = self._total_rows(new_cols)
         vw   = self._scroll.viewport().width() or 900
@@ -2876,7 +4220,7 @@ class VirtualGrid(QWidget):
         if not self._paths: super().keyPressEvent(e); return
         cols = self._last_cols or self._calc_cols()
         cur  = self._selected
-        idx  = self._paths.index(cur) if cur in self._paths else -1
+        idx  = self._pos.get(cur, -1)
         n    = len(self._paths)
         new_idx = idx
 
@@ -2933,7 +4277,7 @@ class VirtualGrid(QWidget):
     def _on_cell_click(self, path: str, mods):
         ctrl  = bool(mods & Qt.KeyboardModifier.ControlModifier)
         shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
-        idx   = self._paths.index(path) if path in self._paths else -1
+        idx   = self._pos.get(path, -1)
         if ctrl:
             # Ctrl+クリック開始時: 既存の _selected を _multi_sel に追加してから toggle
             if self._selected and not self._multi_sel:
@@ -3061,6 +4405,7 @@ class _ThumbCell(QFrame):
     def __init__(self, path: str, size: int, parent=None):
         super().__init__(parent)
         self.path = path; self._size = size
+        self._sel_state = None   # v2.06 P3: (selected, multi) の前回値
         self.setFixedSize(size + 6, size + 26)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet(f"QFrame{{background:{PAL['bg3']};border:2px solid {PAL['bg3']};border-radius:4px;}}")
@@ -3078,13 +4423,44 @@ class _ThumbCell(QFrame):
         self._name_lbl.setStyleSheet(f"color:{PAL['fg2']};font-size:8pt;background:transparent;border:none;")
         self._name_lbl.move(0, size + 4)
 
+        # 系統バッジ（画像の左上に重ねて表示）
+        self._badge_lbl = QLabel(self)
+        self._badge_lbl.setFixedSize(24, 16)
+        self._badge_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._badge_lbl.hide()
+        self._badge_w = 0   # 表示中のバッジ幅（0=無し）
+
+    def set_lineage_badge(self, text: str, bg: str | None):
+        """系統バッジを設定する。text が空ならバッジを消す。"""
+        if not text or not bg:
+            self._badge_lbl.hide()
+            return
+        self._badge_lbl.setText(text)
+        self._badge_lbl.setStyleSheet(
+            f"QLabel{{background:{bg};color:#fff;border-radius:3px;"
+            f"font-size:7pt;font-weight:bold;padding:0 1px;}}")
+        # 画像（左上 3,3 / サイズ self._size）の左上に重ねる
+        self._badge_lbl.move(5, 5)
+        self._badge_lbl.show()
+        self._badge_w = 0  # ファイル名ラベル幅はバッジに影響されない
+
     def set_pixmap(self, px: QPixmap):
+        # v2.06 P3: ボックスにぴったり収まっている場合は再スケールしない
+        # （_compose_overlay/load が KeepAspectRatio で縮めた直後の二重スケールを省く。
+        #   元画像がセルより小さい場合は従来どおり拡大表示する）
+        if max(px.width(), px.height()) == self._size:
+            self._img_lbl.setPixmap(px)
+            return
         self._img_lbl.setPixmap(px.scaled(
             self._size, self._size,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation))
 
     def set_selected(self, selected: bool, multi: bool = False):
+        state = (bool(selected), bool(multi))
+        if state == self._sel_state:
+            return  # v2.06 P3: 状態が変わった時だけ setStyleSheet（スクロール毎の再計算削減）
+        self._sel_state = state
         if multi:
             bg = PAL["sel"]; bd = PAL["sel"]
         elif selected:
@@ -3177,7 +4553,8 @@ class _PixmapLoader(QThread):
     """巨大画像をバックグラウンドスレッドでデコードし、完了をシグナルで通知する。
     GUIスレッドのフリーズを防止するためFullViewerが使用する。
     """
-    loaded  = Signal(str, QPixmap)   # (path, pixmap) — 成功
+    # [v2.05 FIX] T1: QPixmap → QImage (ワーカスレッドでは QImage のみ生成)
+    loaded  = Signal(str, QImage)    # (path, image) — 成功
     failed  = Signal(str, str)       # (path, error_msg) — 失敗
 
     def __init__(self, path: str, rot: int, parent=None):
@@ -3194,33 +4571,34 @@ class _PixmapLoader(QThread):
             return
         cache_key = f"__fv__{self._path}:{self._rot}"
         # メモリキャッシュにあれば即返す（デコード不要）
-        with _mem_lock:
-            cached = _mem.get(cache_key)
+        cached = _mem_get(cache_key)
         if cached is not None:
             if not self._cancelled:
                 self.loaded.emit(self._path, cached)
             return
         try:
-            px = QPixmap(self._path)
-            if px.isNull():
-                pil = Image.open(self._path)
-                if pil.mode not in ("RGB", "RGBA"):
-                    pil = pil.convert("RGBA")
-                px = pil_to_qpixmap(pil)
+            t0 = time.perf_counter()  # v2.06 計測
+            # [v2.05 FIX] T1: ワーカスレッドでは QImage のみ生成
+            qi = QImage(self._path)
+            if qi.isNull():
+                with Image.open(self._path) as pil:
+                    if pil.mode not in ("RGB", "RGBA"):
+                        pil = pil.convert("RGBA")
+                    qi = pil_to_qimage(pil)
             if self._cancelled:
                 return
             if self._rot:
                 tf = QTransform().rotate(self._rot)
-                px = px.transformed(tf, Qt.TransformationMode.SmoothTransformation)
-            # キャッシュ上限管理（古いエントリを削除）— ロック内で実施
+                qi = qi.transformed(tf, Qt.TransformationMode.SmoothTransformation)
             with _mem_lock:
                 fv_keys = [k for k in list(_mem) if k.startswith("__fv__")]
                 if len(fv_keys) > 8:
                     for old_k in fv_keys[:4]:
                         _mem.pop(old_k, None)
-                _mem[cache_key] = px
+            _mem_put(cache_key, qi.copy())
+            _record_load("fullview", t0)  # v2.06 計測: 全画面デコード所要時間
             if not self._cancelled:
-                self.loaded.emit(self._path, px)
+                self.loaded.emit(self._path, qi)
         except Exception as e:
             if not self._cancelled:
                 self.failed.emit(self._path, str(e))
@@ -3230,13 +4608,31 @@ class _PixmapLoader(QThread):
 # ══════════════════════════════════════════════════════════════════════════════
 #  FullViewer
 # ══════════════════════════════════════════════════════════════════════════════
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+
+    class _WindowPosition(ctypes.Structure):
+        _fields_ = [("hwnd", wintypes.HWND), ("hwndInsertAfter", wintypes.HWND),
+                    ("x", ctypes.c_int), ("y", ctypes.c_int),
+                    ("cx", ctypes.c_int), ("cy", ctypes.c_int), ("flags", wintypes.UINT)]
+
+    class _WindowPlacement(ctypes.Structure):
+        _fields_ = [("length", wintypes.UINT), ("flags", wintypes.UINT),
+                    ("showCmd", wintypes.UINT), ("ptMinPosition", wintypes.POINT),
+                    ("ptMaxPosition", wintypes.POINT), ("rcNormalPosition", wintypes.RECT)]
+
+
 class FullViewer(QDialog):
     """全画面画像ビューア"""
     _HIDE_DELAY = 2500
+    _BUSY_DELAY = 300      # ms. 超えて待たされた時だけ「読み込み中...」を出す
 
     def __init__(self, parent, path: str, paths: list,
                  loop_mode: str = "loop", slideshow: bool = False,
                  start_maximized: bool = False):
+        self._restoring_maximized = False
+        self._fullscreen_placement = None
         super().__init__(parent)
         self.setWindowTitle(APP_NAME)
         self.setWindowFlags(Qt.WindowType.Window)
@@ -3258,6 +4654,13 @@ class FullViewer(QDialog):
         # 開いた時のウィンドウ状態を記録（全画面解除時に戻す）
         self._pre_fullscreen_maximized = False  # 全画面前が最大化だったか
         self._normal_size = None                # 通常ウィンドウサイズ（画像に合わせる）
+        self._immersive_prev_mode = None        # 没入前の fit モード（解除時に復元）
+        self._prefetch: dict = {}               # {path: _PixmapLoader} 隣接画像の先読み
+
+        # [v2.17] 「読み込み中...」は実際に待たされた時だけ出すための遅延タイマー
+        self._busy_timer = QTimer(self)
+        self._busy_timer.setSingleShot(True)
+        self._busy_timer.timeout.connect(self._show_busy_overlay)
 
         self._build_ui()
 
@@ -3301,21 +4704,21 @@ class FullViewer(QDialog):
         self._ss_spin.setFixedWidth(48); self._ss_spin.setFixedHeight(28)
         self._ss_spin.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._ss_spin.setStyleSheet(f"background:#1e1e1e;color:{PAL['fg1']};border:1px solid #333;border-radius:4px;")
-        self._ss_btn = tbtn("▶ SS", "スライドショー (S)"); self._ss_btn.clicked.connect(self._toggle_ss)
-        self._fs_btn = tbtn("⛶ 全画面", "没入モード (Space/F11)")
+        self._ss_btn = tbtn("▶ SS", T("スライドショー (S)")); self._ss_btn.clicked.connect(self._toggle_ss)
+        self._fs_btn = tbtn(T("⛶ 全画面"), T("没入モード (Space/F11)"))
         self._fs_btn.clicked.connect(self._toggle_immersive)
-        self._fit_btn = tbtn("⊞ 実寸", "実寸/fitモード切替")
+        self._fit_btn = tbtn(T("⊞ 実寸"), T("実寸/fitモード切替"))
         self._fit_btn.clicked.connect(self._toggle_actual_size)
-        rot_btn  = tbtn("↺", "回転 (R)");  rot_btn.clicked.connect(self._rotate)
-        zin_btn  = tbtn("🔍+", "拡大 (+)"); zin_btn.clicked.connect(self._zoom_in)
-        zout_btn = tbtn("🔍−", "縮小 (-)"); zout_btn.clicked.connect(self._zoom_out)
-        z1_btn   = tbtn("1:1", "等倍 (0)"); z1_btn.clicked.connect(self._zoom_reset)
-        close_btn= tbtn("✕", "閉じる (Esc/Enter)"); close_btn.clicked.connect(self.close)
+        rot_btn  = tbtn("↺", T("回転 (R)"));  rot_btn.clicked.connect(self._rotate)
+        zin_btn  = tbtn("🔍+", T("拡大 (+)")); zin_btn.clicked.connect(self._zoom_in)
+        zout_btn = tbtn("🔍−", T("縮小 (-)")); zout_btn.clicked.connect(self._zoom_out)
+        z1_btn   = tbtn("1:1", T("等倍 (0)")); z1_btn.clicked.connect(self._zoom_reset)
+        close_btn= tbtn("✕", T("閉じる (Esc/Enter)")); close_btn.clicked.connect(self.close)
         close_btn.setStyleSheet(
             f"QPushButton{{background:#1e1e1e;color:{PAL['red']};border:1px solid #333;border-radius:4px;padding:0 8px;}}"
             f"QPushButton:hover{{background:{PAL['red']};color:#fff;}}")
 
-        for w in [self._ss_btn, QLabel("秒"), self._ss_spin, self._fs_btn,
+        for w in [self._ss_btn, QLabel(T("秒")), self._ss_spin, self._fs_btn,
                   self._fit_btn, rot_btn, zin_btn, zout_btn, z1_btn, close_btn]:
             if isinstance(w, QLabel):
                 w.setStyleSheet(f"color:{PAL['fg2']};")
@@ -3343,6 +4746,11 @@ class FullViewer(QDialog):
         self._pix_item = QGraphicsPixmapItem()
         self._pix_item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
         self._scene.addItem(self._pix_item)
+        # [v2.17] viewport 側の Resize を監視してフィットを焼き直す。
+        # ツールバー／シークバーの出現・消えるはレイアウトだけを変えるため
+        # ウィンドウの resizeEvent を経由せず、変換が古い viewport サイズを
+        # 使い続けていた（実測 m11=2.7692 / 正 2.6010、下辺が約 6% 切れていた）。
+        self._scene_widget.viewport().installEventFilter(self)
         # オーバーレイテキスト
         self._overlay_item = self._scene.addText("")
         self._overlay_item.setDefaultTextColor(QColor("#ffffff"))
@@ -3375,14 +4783,12 @@ class FullViewer(QDialog):
         if not self._paths:
             return
         path = self._paths[self._idx]
-        try:
-            px = QPixmap(path)
-            if px.isNull():
-                raise ValueError("load failed")
-        except Exception:
+        dimensions = QImageReader(path).size()
+        iw, ih = dimensions.width(), dimensions.height()
+        if iw <= 0 or ih <= 0:
             try:
-                pil = Image.open(path)
-                px = pil_to_qpixmap(pil)
+                with Image.open(path) as pil:
+                    iw, ih = pil.size
             except Exception:
                 self._show_image()
                 return
@@ -3396,7 +4802,6 @@ class FullViewer(QDialog):
             QTimer.singleShot(30, self._show_image)
             return
 
-        iw, ih = px.width(), px.height()
         # スクリーンサイズを取得
         screen = self.screen() or QApplication.primaryScreen()
         sg = screen.availableGeometry()
@@ -3418,7 +4823,7 @@ class FullViewer(QDialog):
         self._normal_size = (x, y, win_w, win_h)
         # 通常ウィンドウはウィンドウ自体が画像サイズに合わせてあるので原寸表示
         self._fit_mode = "actual"
-        self._fit_btn.setText("⊟ 原寸")
+        self._fit_btn.setText(T("⊟ 原寸"))
         self.show()
         self.setFocus()
         # show() 後に _show_image（ビューポートサイズ確定済み）
@@ -3430,28 +4835,68 @@ class FullViewer(QDialog):
         if self._immersive:
             # 全画面前の状態を記録
             self._pre_fullscreen_maximized = self.isMaximized()
-            if not self._pre_fullscreen_maximized and self._normal_size is None:
+            self._fullscreen_placement = None
+            if (self._pre_fullscreen_maximized and sys.platform == "win32"
+                    and QApplication.platformName() == "windows"):
+                placement = _WindowPlacement()
+                placement.length = ctypes.sizeof(placement)
+                if ctypes.windll.user32.GetWindowPlacement(
+                        wintypes.HWND(int(self.winId())), ctypes.byref(placement)):
+                    self._fullscreen_placement = placement
+            if not self._pre_fullscreen_maximized:
                 # 現在のジオメトリを保存
                 g = self.geometry()
                 self._normal_size = (g.x(), g.y(), g.width(), g.height())
+            # [v2.17] 原寸(actual)のまま全画面にすると scale=1.0 固定のまま画面だけ広がるため、
+            # 画像が画面の78%（1600x900 → 2048x1152 実測）で取り残され「異様に小さく」見える。
+            # よって没入中だけ一時的に fit へ倒して画面いっぱいに広げる。解除時は元のモードへ戻す。
+            self._immersive_prev_mode = self._fit_mode
+            if self._fit_mode == "actual":
+                self._fit_mode = "fit"
+                self._fit_btn.setText("⊞ fit")
             self.showFullScreen()       # OS装飾なし真全画面
             self._hide_ui()
-            self._fs_btn.setText("⊠ 戻す")
+            self._fs_btn.setText(T("⊠ 戻す"))
             QTimer.singleShot(30, self._apply_view)
         else:
+            # 最大化後にバーを再表示すると、Windowsでウィンドウが最小サイズに縮む。
+            self._show_ui_now()
             # 全画面前の状態に戻す
             if self._pre_fullscreen_maximized:
-                self.showMaximized()
+                self._restoring_maximized = self._fullscreen_placement is not None
+                try:
+                    self.showMaximized()
+                finally:
+                    if self._restoring_maximized:
+                        ctypes.windll.user32.SetWindowPlacement(
+                            wintypes.HWND(int(self.winId())),
+                            ctypes.byref(self._fullscreen_placement))
+                    self._restoring_maximized = False
             elif self._normal_size:
                 x, y, w, h = self._normal_size
                 self.showNormal()
                 self.setGeometry(x, y, w, h)
             else:
                 self.showNormal()
-            self._show_ui_now()
-            self._fs_btn.setText("⛶ 全画面")
+            # [v2.17] 突入前の原寸表示へ戻す。ただし没入中にユーザーが
+            # ⊞/⊟ を押して変更していたら（current != fit）その選択を尊重する。
+            if self._immersive_prev_mode == "actual" and self._fit_mode == "fit":
+                self._fit_mode = "actual"
+                self._fit_btn.setText(T("⊟ 原寸"))
+            self._immersive_prev_mode = None
+            self._fs_btn.setText(T("⛶ 全画面"))
             self._hide_timer.stop()
             QTimer.singleShot(30, self._apply_view)
+
+    def nativeEvent(self, event_type, message):
+        if self._restoring_maximized:
+            msg = wintypes.MSG.from_address(int(message))
+            if (msg.message == 0x0046
+                    and not ctypes.windll.user32.IsZoomed(wintypes.HWND(msg.hWnd))):
+                # Qtが最大化の直前に通常サイズへ戻すWM_WINDOWPOSCHANGINGだけを抑制する。
+                position = _WindowPosition.from_address(msg.lParam)
+                position.flags |= 0x0001 | 0x0002  # SWP_NOSIZE | SWP_NOMOVE
+        return super().nativeEvent(event_type, message)
 
     def _show_ui_now(self):
         self._toolbar.show(); self._seekbar_frame.show()
@@ -3466,12 +4911,25 @@ class FullViewer(QDialog):
             self._hide_timer.start(self._HIDE_DELAY)
         super().mouseMoveEvent(e)
 
+    def eventFilter(self, obj, e):
+        """viewport のサイズ変化（chrome の出現／格納、レイアウト確定）で変換を焼き直す。"""
+        if e.type() == QEvent.Type.Resize:
+            sw = getattr(self, "_scene_widget", None)
+            if sw is not None and obj is sw.viewport():
+                self._apply_view()
+        return super().eventFilter(obj, e)
+
     # ── 画像表示 ──────────────────────────────────────────────────────────
     def _load_pixmap(self, path: str) -> QPixmap | None:
-        """キャッシュから同期的にPixmapを返す（キャッシュミス時はNone）。
-        実際のデコードは _load_pixmap_async で非同期に行う。"""
+        """キャッシュから同期的にPixmapを返す。
+        [v2.05.1 OPT] T1-opt: cached.copy() を廃止。"""
         cache_key = f"__fv__{path}:{self._rot}"
-        return _mem.get(cache_key)
+        cached = _mem_get(cache_key)
+        if isinstance(cached, QImage):
+            return QPixmap.fromImage(cached)  # copy なし
+        if isinstance(cached, QPixmap):
+            return cached
+        return None
 
     def _load_pixmap_async(self, path: str):
         """非同期でPixmapをデコードし、完了後に _on_pixmap_loaded を呼ぶ。
@@ -3480,15 +4938,82 @@ class FullViewer(QDialog):
         if hasattr(self, "_pix_loader") and self._pix_loader is not None:
             self._pix_loader.cancel()
             self._pix_loader = None
+        self._busy_timer.stop()          # 前回の待機表示予定を取り消す
+        self._overlay_item.hide()
 
         cache_key = f"__fv__{path}:{self._rot}"
-        if cache_key in _mem:
-            # キャッシュヒット: 即時描画
-            self._on_pixmap_loaded(path, _mem[cache_key])
+        # [v2.05 FIX] T1+D6: ロック付きキャッシュ参照
+        cached = _mem_get(cache_key)
+        if isinstance(cached, QImage):
+            self._on_pixmap_loaded(path, cached)
+            return
+        if isinstance(cached, QPixmap):
+            self._on_pixmap_loaded(path, cached.toImage())
             return
 
-        # 読み込み中インジケータ表示
-        self._overlay_item.setPlainText("読み込み中...")
+        # [v2.17] 隣で先読みしていたローダーがあればそのまま引き取る（二重デコード回避）。
+        # 回転値が違うローダーを引き取ると別画像が出るため、rot の一致も条件にする。
+        pf = self._prefetch.pop(path, None)
+        if pf is not None and pf.isRunning() and pf._rot == self._rot:
+            pf.loaded.connect(self._on_pixmap_loaded)
+            pf.failed.connect(self._on_pixmap_failed)
+            self._pix_loader = pf
+            self._busy_timer.start(self._BUSY_DELAY)
+            return
+
+        # [v2.17] 待機表示は「本当に待たされた時だけ」出す。
+        # 従来はキャッシュミス即（デコード 10ms 程度でも）画面中央に文字を重ねており、
+        # ←/→ の送り 12 回中 12 回出ていた（実測）。_BUSY_DELAY 経過時点で
+        # まだローダーが生きていたら出す。
+        self._busy_timer.start(self._BUSY_DELAY)
+
+        loader = _PixmapLoader(path, self._rot, self)
+        loader.loaded.connect(self._on_pixmap_loaded)
+        loader.failed.connect(self._on_pixmap_failed)
+        self._pix_loader = loader
+        loader.start()
+
+    def _prefetch_neighbors(self):
+        """左右の隣画像を裏でデコードして _mem に置く。
+        実測で cold デコード中央値 208ms・最大 343ms、キャッシュヒットは中央値 41ms。
+        先読みしておけば送りがヒット経路になり、待ち時間も「読み込み中...」も消える。"""
+        n = len(self._paths)
+        if n < 2:
+            return
+        keep = {self._paths[j] for j in (self._idx - 1, self._idx + 1) if 0 <= j < n}
+        # 隣でなくなった先読みは止める（送り順が変わった時の無駄打ち防止）
+        for p in [p for p in self._prefetch if p not in keep]:
+            ldr = self._prefetch.pop(p)
+            ldr.cancel()
+        for off in (1, -1):
+            j = self._idx + off
+            if j < 0 or j >= n:
+                continue
+            p = self._paths[j]
+            if p in self._prefetch:
+                continue
+            if isinstance(_mem_get(f"__fv__{p}:{self._rot}"), QImage):
+                continue
+            ldr = _PixmapLoader(p, self._rot, self)
+            # 完了したら台帳から外す（結果はローダー側で _mem に入り済み、シグナルは繋がない）
+            ldr.finished.connect(lambda _l=ldr, _p=p: self._drop_prefetch(_p, _l))
+            self._prefetch[p] = ldr
+            ldr.start()
+
+    def _drop_prefetch(self, path: str, ldr) -> None:
+        if self._prefetch.get(path) is ldr:
+            self._prefetch.pop(path, None)
+
+    def _cancel_prefetch(self):
+        for ldr in list(self._prefetch.values()):
+            ldr.cancel()
+        self._prefetch.clear()
+
+    def _show_busy_overlay(self):
+        """_BUSY_DELAY 経過後もデコード中なら「読み込み中...」を出す。"""
+        if self._pix_loader is None:      # 完了済み（or キャンセル済み）なら出さない
+            return
+        self._overlay_item.setPlainText(T("読み込み中..."))
         br = self._overlay_item.boundingRect()
         sr = self._scene.sceneRect()
         if sr.width() > 0 and sr.height() > 0:
@@ -3499,18 +5024,16 @@ class FullViewer(QDialog):
             self._overlay_item.setPos(100, 100)
         self._overlay_item.show()
 
-        loader = _PixmapLoader(path, self._rot, self)
-        loader.loaded.connect(self._on_pixmap_loaded)
-        loader.failed.connect(self._on_pixmap_failed)
-        self._pix_loader = loader
-        loader.start()
-
-    @Slot(str, QPixmap)
-    def _on_pixmap_loaded(self, path: str, px: QPixmap):
-        """非同期デコード完了コールバック。メインスレッドで実行される。"""
-        # ナビゲーションで別の画像に切り替わっていたら無視
+    @Slot(str, QImage)
+    def _on_pixmap_loaded(self, path: str, qi: QImage):
+        """非同期デコード完了コールバック。メインスレッドで実行される。
+        [v2.05 FIX] T1: QImage → QPixmap 変換を UI スレッドで実施。
+        [v2.05.1 OPT] T1-opt: qi.copy() を廃止 (Qt COW が管理)。4K 画像で高速化。"""
         if not self._paths or path != self._paths[self._idx]:
             return
+        self._busy_timer.stop()
+        self._pix_loader = None        # 完了したので「待機中」状態を解除（_show_busy_overlay の判定材料）
+        px = QPixmap.fromImage(qi)  # copy なし (Qt COW 管理)
         mw = self.parent()
         if hasattr(mw, "_compose_overlay"):
             try:
@@ -3524,22 +5047,29 @@ class FullViewer(QDialog):
         self._apply_view()
         try:
             st = os.stat(path)
-            mode = "実寸" if self._fit_mode == "actual" else "fit"
+            mode = T("実寸") if self._fit_mode == "actual" else "fit"
             self._info_lbl.setText(
-                f"{os.path.basename(path)}  {px.width()}×{px.height()}  "
-                f"{st.st_size//1024}KB  [{self._idx+1}/{len(self._paths)}]  "
-                f"zoom:{self._zoom:.1f}x  {mode}  ←→ナビ  Space=全画面")
+                f"{os.path.basename(path)}  {px.width()}×{px.height()}  "f"{st.st_size//1024}KB  [{self._idx+1}/{len(self._paths)}]  "f"zoom:{self._zoom:.1f}x  {mode}{Te('  ←→ナビ  Space=全画面')}")
         except Exception:
             pass
+        self._prefetch_neighbors()     # [v2.17] 次は先読み済み＝送り待ちゼロにする
 
     @Slot(str, str)
     def _on_pixmap_failed(self, path: str, error: str):
         """非同期デコード失敗コールバック。"""
         if not self._paths or path != self._paths[self._idx]:
             return
-        self._overlay_item.hide()
-        self._scene.clear()
-        self._scene.addText(f"読み込めませんでした: {error}")
+        self._busy_timer.stop()
+        # [v2.05 FIX] D7: scene.clear() を廃止しピクスマップのみクリア
+        self._pix_item.setPixmap(QPixmap())
+        self._overlay_item.setPlainText(f"{Te('読み込めませんでした: ')}{error}")
+        br = self._overlay_item.boundingRect()
+        sr = self._scene.sceneRect()
+        if sr.width() > 0 and sr.height() > 0:
+            self._overlay_item.setPos(
+                sr.center().x() - br.width() / 2,
+                sr.center().y() - br.height() / 2)
+        self._overlay_item.show()
 
     def _apply_view(self):
         """_fit_mode に基づいてビューの変換を設定する。
@@ -3576,7 +5106,7 @@ class FullViewer(QDialog):
 
     def _show_end_overlay(self, msg: str):
         """画像上にオーバーレイテキスト表示"""
-        self._overlay_item.setPlainText(msg + "\n← 前の画像  |  Esc/Enter で閉じる")
+        self._overlay_item.setPlainText(msg + T("\n← 前の画像  |  Esc/Enter で閉じる"))
         br = self._overlay_item.boundingRect()
         sr = self._scene.sceneRect()
         self._overlay_item.setPos(
@@ -3585,10 +5115,24 @@ class FullViewer(QDialog):
         self._overlay_item.show()
 
     def closeEvent(self, e):
-        """ウィンドウを閉じる際にローダーをキャンセルしてリソースを解放する。"""
+        """ウィンドウを閉じる際にローダーをキャンセルしてリソースを解放する。
+        [v2.05 FIX] T2: cancel() 後に wait() で確実にスレッド終了。"""
         if hasattr(self, "_pix_loader") and self._pix_loader is not None:
             self._pix_loader.cancel()
+            self._pix_loader.wait(2000)
+            if self._pix_loader.isRunning():
+                self._pix_loader.terminate()
+                self._pix_loader.wait(500)
             self._pix_loader = None
+        self._busy_timer.stop()
+        # [v2.17] 先読みスレッドも確実に止めてから終了する
+        for ldr in list(self._prefetch.values()):
+            ldr.cancel()
+            ldr.wait(1000)
+            if ldr.isRunning():
+                ldr.terminate()
+                ldr.wait(300)
+        self._prefetch.clear()
         super().closeEvent(e)
 
     def resizeEvent(self, e):
@@ -3608,7 +5152,7 @@ class FullViewer(QDialog):
                 self._idx = 0; self._zoom = 1.0; self._show_image()
             else:
                 self._at_end = True; self._show_image()
-                self._show_end_overlay("▌ 最後の画像です")
+                self._show_end_overlay(T("▌ 最後の画像です"))
         else:
             self._idx += 1; self._zoom = 1.0; self._show_image()
 
@@ -3619,7 +5163,7 @@ class FullViewer(QDialog):
                 self._idx = len(self._paths) - 1; self._zoom = 1.0; self._show_image()
             else:
                 self._at_end = True; self._show_image()
-                self._show_end_overlay("▌ 最初の画像です")
+                self._show_end_overlay(T("▌ 最初の画像です"))
         else:
             self._idx -= 1; self._zoom = 1.0; self._show_image()
 
@@ -3641,7 +5185,7 @@ class FullViewer(QDialog):
         """fit ↔ actual を切り替える。ウィンドウ状態は変更しない。"""
         if self._fit_mode == "fit":
             self._fit_mode = "actual"
-            self._fit_btn.setText("⊟ 原寸")
+            self._fit_btn.setText(T("⊟ 原寸"))
         else:
             self._fit_mode = "fit"
             self._fit_btn.setText("⊞ fit")
@@ -3650,9 +5194,12 @@ class FullViewer(QDialog):
 
     def _rotate(self):
         self._rot = (self._rot + 90) % 360
+        # [v2.17] 回転が変わると先読み結果の key も無効になるので取り消す
+        self._cancel_prefetch()
         # 回転変更でキャッシュ無効化
-        fv_keys = [k for k in list(_mem) if k.startswith("__fv__")]
-        for k in fv_keys: del _mem[k]
+        with _mem_lock:
+            fv_keys = [k for k in list(_mem) if k.startswith("__fv__")]
+            for k in fv_keys: del _mem[k]
         self._show_image()
     def _zoom_in(self):  self._zoom = min(8.0, self._zoom * 1.25); self._update_scroll_policy(); self._show_image()
     def _zoom_out(self): self._zoom = max(0.1, self._zoom / 1.25); self._update_scroll_policy(); self._show_image()
@@ -3741,18 +5288,19 @@ class FullViewer(QDialog):
     def _delete_current(self, permanent: bool = False):
         if not self._paths: return
         path = self._paths[self._idx]
-        dest = "完全削除" if permanent else ("ゴミ箱" if HAS_SEND2TRASH else ".deleted/")
+        dest = T("完全削除") if permanent else (T("ゴミ箱") if HAS_SEND2TRASH else ".deleted/")
         dlg = _DeleteConfirmDialog(
-            "削除確認",
-            f"{os.path.basename(path)}\n\nこのファイルを {dest} に移動しますか？",
+            T("削除確認"),
+            f"{os.path.basename(path)}{Te('␜n␜nこのファイルを ')}{dest}{Te(' に移動しますか？')}",
             permanent=permanent, parent=self)
         dlg.exec()
         if not dlg.confirmed(): return
         ok, err = delete_file(path, permanent=permanent)
         if not ok:
-            QMessageBox.critical(self, "削除エラー", err); return
-        for k in list(_mem): 
-            if path in k: del _mem[k]
+            QMessageBox.critical(self, T("削除エラー"), err); return
+        with _mem_lock:
+            for k in list(_mem):
+                if path in k: del _mem[k]
         META.invalidate(path)
         # 親ウィンドウのリスト更新
         mw = self.parent()
@@ -3792,38 +5340,39 @@ class FullViewer(QDialog):
         self._sync_main_selection()
         menu = QMenu(self)
 
-        open_act = menu.addAction("🖼 全画面で開く")
+        open_act = menu.addAction(T("🖼 全画面で開く"))
         open_act.setEnabled(False)
-        menu.addAction("📂 エクスプローラーで選択", lambda: mw._open_in_explorer(path) if mw and hasattr(mw, "_open_in_explorer") else None)
+        menu.addAction(T("📂 エクスプローラーで選択"), lambda: mw._open_in_explorer(path) if mw and hasattr(mw, "_open_in_explorer") else None)
+        menu.addAction(T("📋 パスをコピー"), lambda: mw._copy_path_to_clipboard([path]) if mw and hasattr(mw, "_copy_path_to_clipboard") else None)
         menu.addSeparator()
 
-        menu.addAction("📋 コピー  Ctrl+C", lambda: mw._copy_to_clipboard() if mw and hasattr(mw, "_copy_to_clipboard") else None)
-        menu.addAction("✂ 切り取り  Ctrl+X", lambda: mw._cut_to_clipboard() if mw and hasattr(mw, "_cut_to_clipboard") else None)
-        menu.addAction("📥 貼り付け  Ctrl+V", lambda: mw._paste_from_clipboard() if mw and hasattr(mw, "_paste_from_clipboard") else None)
+        menu.addAction(T("📋 コピー  Ctrl+C"), lambda: mw._copy_to_clipboard() if mw and hasattr(mw, "_copy_to_clipboard") else None)
+        menu.addAction(T("✂ 切り取り  Ctrl+X"), lambda: mw._cut_to_clipboard() if mw and hasattr(mw, "_cut_to_clipboard") else None)
+        menu.addAction(T("📥 貼り付け  Ctrl+V"), lambda: mw._paste_from_clipboard() if mw and hasattr(mw, "_paste_from_clipboard") else None)
         menu.addSeparator()
 
-        menu.addAction("✏ 名前の変更  F2", self._rename_current)
+        menu.addAction(T("✏ 名前の変更  F2"), self._rename_current)
         menu.addSeparator()
 
-        menu.addAction("🗑 削除  Delete", self._delete_current)
-        menu.addAction("⚠ 完全削除  Shift+Delete", lambda: self._delete_current(True))
+        menu.addAction(T("🗑 削除  Delete"), self._delete_current)
+        menu.addAction(T("⚠ 完全削除  Shift+Delete"), lambda: self._delete_current(True))
         menu.addSeparator()
 
-        rate_menu = menu.addMenu("★ レーティング")
-        for r, lbl in [(0,"なし"),(1,"★1"),(2,"★★2"),(3,"★★★3"),(4,"★★★★4"),(5,"★★★★★5")]:
+        rate_menu = menu.addMenu(T("★ レーティング"))
+        for r, lbl in [(0,T("なし")),(1,"★1"),(2,"★★2"),(3,"★★★3"),(4,"★★★★4"),(5,"★★★★★5")]:
             rate_menu.addAction(lbl, lambda _r=r: mw._rate(path, _r) if mw and hasattr(mw, "_rate") else None)
         menu.addSeparator()
 
-        overlay_menu = menu.addMenu("🎨 ロゴオーバーレイ")
-        overlay_menu.addAction("🖼 ロゴを設定...", lambda: mw._overlay_set_logo([path]) if mw and hasattr(mw, "_overlay_set_logo") else None)
-        overlay_menu.addAction("📐 位置・サイズ調整...", lambda: mw._overlay_adjust_safe(path) if mw and hasattr(mw, "_overlay_adjust_safe") else None)
-        overlay_menu.addAction("📁 保存フォルダを開く", lambda: mw._open_logo_folder() if mw and hasattr(mw, "_open_logo_folder") else None)
-        overlay_menu.addAction("🗑 ロゴ設定を削除", lambda: mw._overlay_remove([path]) if mw and hasattr(mw, "_overlay_remove") else None)
+        overlay_menu = menu.addMenu(T("🎨 ロゴオーバーレイ"))
+        overlay_menu.addAction(T("🖼 ロゴを設定..."), lambda: mw._overlay_set_logo([path]) if mw and hasattr(mw, "_overlay_set_logo") else None)
+        overlay_menu.addAction(T("📐 位置・サイズ調整..."), lambda: mw._overlay_adjust_safe(path) if mw and hasattr(mw, "_overlay_adjust_safe") else None)
+        overlay_menu.addAction(T("📁 保存フォルダを開く"), lambda: mw._open_logo_folder() if mw and hasattr(mw, "_open_logo_folder") else None)
+        overlay_menu.addAction(T("🗑 ロゴ設定を削除"), lambda: mw._overlay_remove([path]) if mw and hasattr(mw, "_overlay_remove") else None)
         overlay_menu.addSeparator()
-        overlay_menu.addAction("💾 合成画像を出力...", lambda: mw._overlay_export([path]) if mw and hasattr(mw, "_overlay_export") else None)
+        overlay_menu.addAction(T("💾 合成画像を出力..."), lambda: mw._overlay_export([path]) if mw and hasattr(mw, "_overlay_export") else None)
 
         menu.addSeparator()
-        menu.addAction("ℹ プロパティ  Alt+Enter", lambda: mw._show_properties() if mw and hasattr(mw, "_show_properties") else None)
+        menu.addAction(T("ℹ プロパティ  Alt+Enter"), lambda: mw._show_properties() if mw and hasattr(mw, "_show_properties") else None)
         menu.exec(self._scene_widget.mapToGlobal(pos))
 
 
@@ -3850,7 +5399,7 @@ class LoraTableModel(QAbstractTableModel):
     SORT_DESC = 2
     # ソート可能列（数値で指定: COL_CNT=3, COL_RATE=4, COL_CDATE=5, COL_DATE=6）
     _SORTABLE = {3, 4, 5, 6}
-    _BASE_COLS = ["", "", "LoRA名", "使用枚数", "使用率", "作成日", "最終使用日", "ファイルパス"]
+    _BASE_COLS = ["", "", T("LoRA名"), T("使用枚数"), T("使用率"), T("作成日"), T("最終使用日"), T("ファイルパス")]
 
     def __init__(self, data=None, parent=None):
         super().__init__(parent)
@@ -3890,7 +5439,8 @@ class LoraTableModel(QAbstractTableModel):
         ld = row[4]; cdate = row[6] if len(row) > 6 else "—"
 
         if role == Qt.ItemDataRole.CheckStateRole and col == self.COL_CHK:
-            return Qt.CheckState.Checked if index.row() in self._checked else Qt.CheckState.Unchecked
+            # [v2.05 FIX] D1: fpath ベース
+            return Qt.CheckState.Checked if fpath in self._checked else Qt.CheckState.Unchecked
 
         # サムネイル: DecorationRole で返すと Qt が自動描画 + delegate が描画で二重になる。
         # UserRole+1 専用にして delegate 側からのみ取得させる。
@@ -3921,10 +5471,13 @@ class LoraTableModel(QAbstractTableModel):
 
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
         if role == Qt.ItemDataRole.CheckStateRole and index.column() == self.COL_CHK:
+            # [v2.05 FIX] D1: fpath ベース
+            fpath = self._data[index.row()][1] if index.row() < len(self._data) else None
+            if not fpath: return False
             if value == Qt.CheckState.Checked or value == Qt.CheckState.Checked.value:
-                self._checked.add(index.row())
+                self._checked.add(fpath)
             else:
-                self._checked.discard(index.row())
+                self._checked.discard(fpath)
             self.dataChanged.emit(index, index, [role])
             return True
         return False
@@ -3932,11 +5485,16 @@ class LoraTableModel(QAbstractTableModel):
     def set_data(self, data: list):
         self.beginResetModel()
         self._data = data
-        self._checked.clear()
+        # [v2.05 FIX] D1: _checked はクリアしない (fpath ベース)
+        valid_fpaths = {row[1] for row in data if len(row) > 1}
+        self._checked &= valid_fpaths
+        # [v2.05 FIX] D3: _thumbs クリア (メモリリーク対策)
+        self._thumbs.clear()
         self.endResetModel()
 
     def get_checked_rows(self) -> list:
-        return [self._data[i] for i in sorted(self._checked) if i < len(self._data)]
+        # [v2.05 FIX] D1: fpath ベース
+        return [row for row in self._data if len(row) > 1 and row[1] in self._checked]
 
     def set_thumb(self, fpath: str, pixmap, proxy=None):
         self._thumbs[fpath] = pixmap
@@ -3953,8 +5511,10 @@ class LoraTableModel(QAbstractTableModel):
                 break
 
     def check_all(self, checked: bool):
+        # [v2.05 FIX] D1: fpath ベース
+        if not self._data: return
         if checked:
-            self._checked = set(range(len(self._data)))
+            self._checked = {row[1] for row in self._data if len(row) > 1}
         else:
             self._checked.clear()
         self.dataChanged.emit(
@@ -3993,7 +5553,7 @@ class LoraStatsWindow(QDialog):
 
     def __init__(self, parent, lora_folder: str):
         super().__init__(parent)
-        self.setWindowTitle("📊 LoRA 使用率分析")
+        self.setWindowTitle(T("📊 LoRA 使用率分析"))
         self.resize(1100, 680)
         self.setWindowFlags(
             self.windowFlags()
@@ -4002,7 +5562,12 @@ class LoraStatsWindow(QDialog):
         )
         self._lora_folder = lora_folder
         self._all_data: list = []
-        self._thumb_executor = None   # QThreadPool 経由で非同期サムネ読み込み
+        self._thumb_executor = None
+        # [v2.05 FIX] T3: スレッド参照保持
+        self._analysis_thread = None
+        self._analysis_cancelled = False
+        self._thumb_thread = None
+        self._thumb_cancelled = False
         self._results_ready.connect(self._apply_results)
         self._thumb_loaded.connect(self._on_thumb_loaded)
         self._build_ui()
@@ -4016,15 +5581,15 @@ class LoraStatsWindow(QDialog):
         hdr = QWidget()
         hdr.setStyleSheet(f"background:{PAL['bg2']};border-bottom:1px solid {PAL['border']};")
         hl = QHBoxLayout(hdr); hl.setContentsMargins(12,8,12,8)
-        title = QLabel("📊 LoRA 使用率分析")
+        title = QLabel(T("📊 LoRA 使用率分析"))
         title.setStyleSheet(f"font-weight:bold;font-size:11pt;color:{PAL['fg0']};")
-        self._status_lbl = QLabel("分析中...")
+        self._status_lbl = QLabel(T("分析中..."))
         self._status_lbl.setStyleSheet(f"color:{PAL['fg2']};")
-        reload_btn = QPushButton("🔄 再分析"); reload_btn.clicked.connect(self._start_analysis)
-        csv_btn    = QPushButton("💾 CSV出力"); csv_btn.clicked.connect(self._export_csv)
+        reload_btn = QPushButton(T("🔄 再分析")); reload_btn.clicked.connect(self._start_analysis)
+        csv_btn    = QPushButton(T("💾 CSV出力")); csv_btn.clicked.connect(self._export_csv)
         self._max_btn = QPushButton("⬜")
         self._max_btn.setFixedSize(28, 28)
-        self._max_btn.setToolTip("最大化 / 元に戻す")
+        self._max_btn.setToolTip(T("最大化 / 元に戻す"))
         self._max_btn.clicked.connect(self._toggle_maximize)
         hl.addWidget(title); hl.addWidget(self._status_lbl, 1)
         hl.addWidget(reload_btn); hl.addWidget(csv_btn); hl.addWidget(self._max_btn)
@@ -4036,20 +5601,20 @@ class LoraStatsWindow(QDialog):
         fl = QHBoxLayout(fbar); fl.setContentsMargins(8,4,8,4); fl.setSpacing(8)
         fl.addWidget(QLabel("🔍"))
         self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText("LoRA名で検索...")
+        self._search_edit.setPlaceholderText(T("LoRA名で検索..."))
         self._search_edit.setFixedWidth(480)
         self._search_edit.textChanged.connect(self._refresh)
-        self._unused_cb = QCheckBox("未使用のみ")
+        self._unused_cb = QCheckBox(T("未使用のみ"))
         self._unused_cb.stateChanged.connect(self._refresh)
-        self._check_all_cb = QCheckBox("全選択")
+        self._check_all_cb = QCheckBox(T("全選択"))
         self._check_all_cb.stateChanged.connect(self._on_check_all)
-        self._del_checked_btn = QPushButton("🗑 チェック済みを削除")
+        self._del_checked_btn = QPushButton(T("🗑 チェック済みを削除"))
         self._del_checked_btn.setStyleSheet(
             f"background:#3a1a1a;color:{PAL['red']};border:1px solid {PAL['red']};"
             f"border-radius:4px;padding:2px 10px;")
         self._del_checked_btn.clicked.connect(self._delete_checked)
         fl.addWidget(self._search_edit); fl.addWidget(self._unused_cb); fl.addStretch()
-        fl.addWidget(QLabel("※列ヘッダーをクリックでソート"))
+        fl.addWidget(QLabel(T("※列ヘッダーをクリックでソート")))
         fl.addWidget(self._check_all_cb); fl.addWidget(self._del_checked_btn)
         root.addWidget(fbar)
 
@@ -4118,14 +5683,14 @@ class LoraStatsWindow(QDialog):
         dbar.setStyleSheet(f"background:{PAL['bg2']};border-top:1px solid {PAL['border']};")
         dbar.setFixedHeight(52)
         dl = QHBoxLayout(dbar); dl.setContentsMargins(12,8,12,8)
-        self._detail_lbl = QLabel("LoRAを選択すると詳細が表示されます")
+        self._detail_lbl = QLabel(T("LoRAを選択すると詳細が表示されます"))
         self._detail_lbl.setStyleSheet(f"color:{PAL['fg1']};")
-        self._copy_btn = QPushButton("📋 コピー")
-        self._copy_btn.setToolTip("LoRA名をクリップボードにコピー")
+        self._copy_btn = QPushButton(T("📋 コピー"))
+        self._copy_btn.setToolTip(T("LoRA名をクリップボードにコピー"))
         self._copy_btn.clicked.connect(self._copy_selected_name)
         self._civitai_btn = QPushButton("🌐 Civitai")
         self._civitai_btn.clicked.connect(self._civitai_selected)
-        self._filter_btn = QPushButton("🔍 この画像で絞り込み")
+        self._filter_btn = QPushButton(T("🔍 この画像で絞り込み"))
         self._filter_btn.clicked.connect(self._filter_by_selected)
         dl.addWidget(self._detail_lbl, 1)
         dl.addWidget(self._copy_btn)
@@ -4137,13 +5702,17 @@ class LoraStatsWindow(QDialog):
     #  分析ワーカー
     # ────────────────────────────────────────────────────────────────────
     def _start_analysis(self):
-        self._status_lbl.setText("LoRAフォルダをスキャン中...")
+        self._status_lbl.setText(T("LoRAフォルダをスキャン中..."))
         self._all_data = []
         self._model.set_data([])
-        t = threading.Thread(target=self._worker, daemon=True)
-        t.start()
+        # [v2.05 FIX] T3: スレッド参照を保持
+        self._analysis_cancelled = False
+        self._analysis_thread = threading.Thread(target=self._worker, daemon=True)
+        self._analysis_thread.start()
 
     def _worker(self):
+        # [v2.05 FIX] T3: キャンセルチェック
+        if getattr(self, "_analysis_cancelled", False): return
         lora_exts = {".safetensors",".ckpt",".pt",".bin",".pth"}
         lora_files = {}
         for root_d, _, fns in os.walk(self._lora_folder):
@@ -4188,8 +5757,7 @@ class LoraStatsWindow(QDialog):
         self._all_data = results
         unused = sum(1 for r in results if r[2] == 0)
         self._status_lbl.setText(
-            f"LoRA {total_lora}件  /  画像 {total_imgs}枚でスキャン完了  "
-            f"(未使用 {unused}件)")
+            f"LoRA {total_lora}{Te('件  /  画像 ')}{total_imgs}{Te('枚でスキャン完了  ')}"f"{Te('(未使用 ')}{unused}{Te('件)')}")
         self._refresh()
         # データ確定後に列幅・行高を再適用してサムネ列が潰れないようにする
         def _fix():
@@ -4239,7 +5807,10 @@ class LoraStatsWindow(QDialog):
                 except Exception:
                     pass
 
-        threading.Thread(target=worker, daemon=True).start()
+        # [v2.05 FIX] T3: サムネスレッド参照保持
+        self._thumb_cancelled = False
+        self._thumb_thread = threading.Thread(target=worker, daemon=True)
+        self._thumb_thread.start()
 
     @Slot(str, object)
     def _on_thumb_loaded(self, fpath: str, pil_img):
@@ -4247,7 +5818,8 @@ class LoraStatsWindow(QDialog):
         try:
             from PIL.ImageQt import ImageQt
             qimg = ImageQt(pil_img)
-            px = QPixmap.fromImage(qimg)
+            # [v2.05 FIX] W14: PIL バッファ参照切断のため deep copy
+            px = QPixmap.fromImage(qimg).copy()
             self._model.set_thumb(fpath, px, self._proxy)
             # 行高が潰れていたら再設定
             vh = self._table.verticalHeader()
@@ -4257,6 +5829,19 @@ class LoraStatsWindow(QDialog):
             pass
 
     # ────────────────────────────────────────────────────────────────────
+    #  終了処理 (v2.05 FIX T3)
+    # ────────────────────────────────────────────────────────────────────
+    def closeEvent(self, event):
+        """ダイアログ終了時にバックグラウンドスレッドをキャンセル。"""
+        self._analysis_cancelled = True
+        self._thumb_cancelled = True
+        if self._analysis_thread is not None and self._analysis_thread.is_alive():
+            self._analysis_thread.join(timeout=2.0)
+        if self._thumb_thread is not None and self._thumb_thread.is_alive():
+            self._thumb_thread.join(timeout=2.0)
+        super().closeEvent(event)
+
+    # ────────────────────────────────────────────────────────────────────
     #  フィルタ / ソート
     # ────────────────────────────────────────────────────────────────────
     def _refresh(self):
@@ -4264,12 +5849,21 @@ class LoraStatsWindow(QDialog):
         only_unused = self._unused_cb.isChecked()
         data = [r for r in self._all_data
                 if (not q or q in r[0].lower()) and (not only_unused or r[2] == 0)]
-        self._model._data = data
-        self._model.apply_sort()
-        self._model.set_data(self._model._data)
+        # [v2.05 FIX] D2: 二重リセット解消 (ローカルソート → set_data)
+        rev = (self._model._sort_dir == self._model.SORT_DESC)
+        col = self._model._sort_col
+        if col == self._model.COL_CNT:
+            data.sort(key=lambda r: r[2], reverse=rev)
+        elif col == self._model.COL_RATE:
+            data.sort(key=lambda r: r[3], reverse=rev)
+        elif col == self._model.COL_CDATE:
+            data.sort(key=lambda r: (r[6] if len(r) > 6 else ""), reverse=rev)
+        elif col == self._model.COL_DATE:
+            data.sort(key=lambda r: (r[4] or ""), reverse=rev)
+        self._model.set_data(data)
         unused = sum(1 for r in self._all_data if r[2] == 0)
         self._status_lbl.setText(
-            f"表示 {len(self._model._data)}件  |  未使用 {unused}件 / 全{len(self._all_data)}件")
+            f"{Te('表示 ')}{len(self._model._data)}{Te('件  |  未使用 ')}{unused}{Te('件 / 全')}{len(self._all_data)}{Te('件')}")
         self._check_all_cb.blockSignals(True)
         self._check_all_cb.setChecked(False)
         self._check_all_cb.blockSignals(False)
@@ -4298,9 +5892,9 @@ class LoraStatsWindow(QDialog):
         try:
             s = os.path.getsize(fpath)
             sz = f"  {s//1024//1024}MB" if s > 1024*1024 else f"  {s//1024}KB"
-        except: pass
+        except Exception: pass
         self._detail_lbl.setText(
-            f"📄 {display}{sz}  |  使用: {cnt}枚 ({rate:.1f}%)  |  作成日: {cdate}  |  最終: {ld}  |  {fpath}")
+            f"📄 {display}{sz}{Te('  |  使用: ')}{cnt}{Te('枚 (')}{rate:.1f}{Te('%)  |  作成日: ')}{cdate}{Te('  |  最終: ')}{ld}  |  {fpath}")
 
     def _on_double_click(self): self._filter_by_selected()
 
@@ -4309,7 +5903,7 @@ class LoraStatsWindow(QDialog):
         row = self._selected_row()
         if not row: return
         QApplication.clipboard().setText(row[0])
-        self._status_lbl.setText(f"📋 コピーしました: {row[0]}")
+        self._status_lbl.setText(f"{Te('📋 コピーしました: ')}{row[0]}")
 
     def _toggle_maximize(self):
         if self.isMaximized():
@@ -4329,13 +5923,13 @@ class LoraStatsWindow(QDialog):
         row = self._selected_row()
         if not row: return
         menu = QMenu(self)
-        copy_act = menu.addAction(f"📋 名前をコピー  —  {row[0]}")
+        copy_act = menu.addAction(f"{Te('📋 名前をコピー  —  ')}{row[0]}")
         menu.addSeparator()
-        del_act  = menu.addAction(f"🗑 削除  —  {row[0]}")
-        del_act.setToolTip("LoRAファイルと関連ファイル(.cm-info.json / .preview.jpeg)を削除します")
+        del_act  = menu.addAction(f"{Te('🗑 削除  —  ')}{row[0]}")
+        del_act.setToolTip(T("LoRAファイルと関連ファイル(.cm-info.json / .preview.jpeg)を削除します"))
         menu.addSeparator()
-        civ_act  = menu.addAction("🌐 Civitai で開く")
-        filt_act = menu.addAction("🔍 この画像で絞り込み")
+        civ_act  = menu.addAction(T("🌐 Civitai で開く"))
+        filt_act = menu.addAction(T("🔍 この画像で絞り込み"))
         act = menu.exec(self._table.viewport().mapToGlobal(pos))
         if act == copy_act:
             self._copy_selected_name()
@@ -4377,19 +5971,18 @@ class LoraStatsWindow(QDialog):
             all_files.extend(self._related_files(fpath))
 
         if not all_files:
-            QMessageBox.information(self, "削除", "削除対象のファイルが見つかりません。")
+            QMessageBox.information(self, T("削除"), T("削除対象のファイルが見つかりません。"))
             return
 
         # 確認ダイアログ
         names = "\n".join(f"  • {os.path.basename(f)}" for f in all_files[:20])
         if len(all_files) > 20:
-            names += f"\n  … 他 {len(all_files)-20} ファイル"
+            names += f"{Te('␜n  … 他 ')}{len(all_files)-20}{Te(' ファイル')}"
         msg = QMessageBox(self)
-        msg.setWindowTitle("削除の確認")
+        msg.setWindowTitle(T("削除の確認"))
         msg.setIcon(QMessageBox.Icon.Warning)
         msg.setText(
-            f"以下の {len(all_files)} ファイルを完全に削除します。\n"
-            f"この操作は取り消せません。\n\n{names}")
+            f"{Te('以下の ')}{len(all_files)}{Te(' ファイルを完全に削除します。␜n')}"f"{Te('この操作は取り消せません。␜n␜n')}{names}")
         msg.setStandardButtons(
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         msg.setDefaultButton(QMessageBox.StandardButton.No)
@@ -4412,16 +6005,16 @@ class LoraStatsWindow(QDialog):
         self._refresh()
 
         if errors:
-            QMessageBox.warning(self, "削除エラー",
-                                "一部のファイルを削除できませんでした:\n" + "\n".join(errors))
+            QMessageBox.warning(self, T("削除エラー"),
+                                T("一部のファイルを削除できませんでした:\n") + "\n".join(errors))
         else:
-            self._status_lbl.setText(f"✅ {len(deleted)}ファイルを削除しました")
+            self._status_lbl.setText(f"✅ {len(deleted)}{Te('ファイルを削除しました')}")
 
     def _delete_checked(self):
         """チェック済み行をまとめて削除する。"""
         rows = self._model.get_checked_rows()
         if not rows:
-            QMessageBox.information(self, "削除", "チェックされているLoRAがありません。")
+            QMessageBox.information(self, T("削除"), T("チェックされているLoRAがありません。"))
             return
         self._delete_rows(rows)
 
@@ -4444,18 +6037,18 @@ class LoraStatsWindow(QDialog):
             mw._set_tag_search(row[0], switch_tab=True)
 
     def _export_csv(self):
-        fp, _ = QFileDialog.getSaveFileName(self, "CSV出力", "", "CSV (*.csv)")
+        fp, _ = QFileDialog.getSaveFileName(self, T("CSV出力"), "", "CSV (*.csv)")
         if not fp: return
         try:
             with open(fp, "w", newline="", encoding="utf-8-sig") as f:
                 w = csv.writer(f)
-                w.writerow(["LoRA名","使用枚数","使用率(%)","作成日","最終使用日","ファイルパス"])
+                w.writerow([T("LoRA名"),T("使用枚数"),T("使用率(%)"),T("作成日"),T("最終使用日"),T("ファイルパス")])
                 for r in sorted(self._all_data, key=lambda x: -x[2]):
                     cdate = r[6] if len(r) > 6 else "—"
                     w.writerow([r[0], r[2], f"{r[3]:.2f}", cdate, r[4], r[1]])
-            QMessageBox.information(self, "完了", f"CSVを出力しました:\n{fp}")
+            QMessageBox.information(self, T("完了"), f"{Te('CSVを出力しました:␜n')}{fp}")
         except Exception as ex:
-            QMessageBox.critical(self, "エラー", str(ex))
+            QMessageBox.critical(self, T("エラー"), str(ex))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -4464,7 +6057,7 @@ class LoraStatsWindow(QDialog):
 class SettingsDialog(QDialog):
     def __init__(self, parent, cfg: dict, enabled_exts: list, loop_mode: str):
         super().__init__(parent)
-        self.setWindowTitle("⚙ 環境設定")
+        self.setWindowTitle(T("⚙ 環境設定"))
         self.setMinimumSize(480, 400)
         self._cfg = dict(cfg)
         self._result_exts = list(enabled_exts)
@@ -4477,12 +6070,30 @@ class SettingsDialog(QDialog):
         self._tabs = QTabWidget()
         tabs = self._tabs
 
+        # ── タブ0: 言語 / Language
+        t0 = QWidget(); l0 = QVBoxLayout(t0)
+        grp0 = QGroupBox(T("表示言語"))
+        f0 = QFormLayout(grp0)
+        self._lang_combo = QComboBox()
+        for code, name in SUPPORTED_LANGUAGES:
+            self._lang_combo.addItem(name, code)
+        idx = self._lang_combo.findData(self._cfg.get("language") or _load_ui_language())
+        if idx >= 0:
+            self._lang_combo.setCurrentIndex(idx)
+        f0.addRow(T("言語"), self._lang_combo)
+        l0.addWidget(grp0)
+        lang_note = QLabel(T("アプリを再起動すると新しい言語で表示されます"))
+        lang_note.setWordWrap(True)
+        lang_note.setStyleSheet(f"color:{PAL['fg3']};")
+        l0.addWidget(lang_note); l0.addStretch()
+        tabs.insertTab(0, t0, T("言語"))
+
         # ── タブ1: FullViewer
         t1 = QWidget(); l1 = QVBoxLayout(t1)
-        grp1 = QGroupBox("画像端でのループ")
+        grp1 = QGroupBox(T("画像端でのループ"))
         lg = QVBoxLayout(grp1)
-        self._rb_loop = QRadioButton("ループ（最初/最後に戻る）")
-        self._rb_stop = QRadioButton("端で停止（画像上にメッセージ表示）")
+        self._rb_loop = QRadioButton(T("ループ（最初/最後に戻る）"))
+        self._rb_stop = QRadioButton(T("端で停止（画像上にメッセージ表示）"))
         if loop_mode == "loop": self._rb_loop.setChecked(True)
         else: self._rb_stop.setChecked(True)
         lg.addWidget(self._rb_loop); lg.addWidget(self._rb_stop)
@@ -4491,7 +6102,7 @@ class SettingsDialog(QDialog):
 
         # ── タブ2: 拡張子
         t2 = QWidget(); l2 = QVBoxLayout(t2)
-        grp2 = QGroupBox("読み込む拡張子（チェック=有効）")
+        grp2 = QGroupBox(T("読み込む拡張子（チェック=有効）"))
         eg = QGridLayout(grp2)
         self._ext_cbs = {}
         for i, ext in enumerate(SUPPORTED_EXTS):
@@ -4499,69 +6110,67 @@ class SettingsDialog(QDialog):
             cb.setChecked(ext in enabled_exts)
             self._ext_cbs[ext] = cb
             eg.addWidget(cb, i//4, i%4)
-        all_btn = QPushButton("すべて選択"); all_btn.clicked.connect(lambda: [cb.setChecked(True) for cb in self._ext_cbs.values()])
-        none_btn = QPushButton("すべて解除"); none_btn.clicked.connect(lambda: [cb.setChecked(False) for cb in self._ext_cbs.values()])
+        all_btn = QPushButton(T("すべて選択")); all_btn.clicked.connect(lambda: [cb.setChecked(True) for cb in self._ext_cbs.values()])
+        none_btn = QPushButton(T("すべて解除")); none_btn.clicked.connect(lambda: [cb.setChecked(False) for cb in self._ext_cbs.values()])
         btn_row = QHBoxLayout(); btn_row.addWidget(all_btn); btn_row.addWidget(none_btn); btn_row.addStretch()
         l2.addWidget(grp2); l2.addLayout(btn_row); l2.addStretch()
-        tabs.addTab(t2, "拡張子")
+        tabs.addTab(t2, T("拡張子"))
 
         # ── タブ3: LoRA
         t3 = QWidget(); l3 = QFormLayout(t3)
         self._lora_edit = QLineEdit(self._cfg.get("lora_folder",""))
-        browse_btn = QPushButton("参照...")
+        browse_btn = QPushButton(T("参照..."))
         browse_btn.clicked.connect(self._browse_lora)
         lora_row = QHBoxLayout(); lora_row.addWidget(self._lora_edit,1); lora_row.addWidget(browse_btn)
-        l3.addRow("LoRAフォルダ:", lora_row)
-        l3.addRow(QLabel("※ LoRA名クリック時のCivitai検索と連携します"))
+        l3.addRow(T("LoRAフォルダ:"), lora_row)
+        l3.addRow(QLabel(T("※ LoRA名クリック時のCivitai検索と連携します")))
         tabs.addTab(t3, "LoRA")
 
         # ── タブ4: ロゴ
         t4 = QWidget(); l4 = QFormLayout(t4)
         self._logo_edit = QLineEdit(self._cfg.get("logo_folder", str(get_logo_dir())))
-        logo_browse_btn = QPushButton("参照...")
+        logo_browse_btn = QPushButton(T("参照..."))
         logo_browse_btn.clicked.connect(self._browse_logo_folder)
         logo_row = QHBoxLayout(); logo_row.addWidget(self._logo_edit, 1); logo_row.addWidget(logo_browse_btn)
-        l4.addRow("ロゴ保存先:", logo_row)
+        l4.addRow(T("ロゴ保存先:"), logo_row)
         default_logo_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "png_viewer" / "logo"
         logo_note = QLabel(
-            "※ ロゴを登録したときはここに保存されます。\n"
-            f"※ 既定の保存先: {default_logo_dir}\n"
-            "※ 保存先を変更しても、ここに表示されている場所が現在の保存先です。"
+            f"{Te('※ ロゴを登録したときはここに保存されます。␜n')}"f"{Te('※ 既定の保存先: ')}{default_logo_dir}\n"f"{Te('※ 保存先を変更しても、ここに表示されている場所が現在の保存先です。')}"
         )
         logo_note.setWordWrap(True)
         logo_note.setStyleSheet(f"color:{PAL['fg3']};")
         l4.addRow(logo_note)
-        tabs.addTab(t4, "ロゴ")
+        tabs.addTab(t4, T("ロゴ"))
 
         # ── タブ5: キャッシュ
         t5 = QWidget(); l5 = QVBoxLayout(t5)
-        clear_btn = QPushButton("🗑 サムネキャッシュをクリア")
+        clear_btn = QPushButton(T("🗑 サムネキャッシュをクリア"))
         clear_btn.clicked.connect(self._clear_cache)
         l5.addWidget(clear_btn); l5.addStretch()
-        tabs.addTab(t5, "キャッシュ")
+        tabs.addTab(t5, T("キャッシュ"))
 
         root.addWidget(tabs)
 
         # ── ボタン
         bf = QHBoxLayout(); bf.addStretch()
-        ok_btn = QPushButton("保存して閉じる"); ok_btn.setObjectName("accent")
+        ok_btn = QPushButton(T("保存して閉じる")); ok_btn.setObjectName("accent")
         ok_btn.clicked.connect(self._save)
-        cancel_btn = QPushButton("キャンセル"); cancel_btn.clicked.connect(self.reject)
+        cancel_btn = QPushButton(T("キャンセル")); cancel_btn.clicked.connect(self.reject)
         bf.addWidget(cancel_btn); bf.addWidget(ok_btn)
         root.addLayout(bf)
 
     def _browse_lora(self):
-        p = QFileDialog.getExistingDirectory(self, "LoRAフォルダを選択")
+        p = QFileDialog.getExistingDirectory(self, T("LoRAフォルダを選択"))
         if p: self._lora_edit.setText(p)
 
     def _browse_logo_folder(self):
-        p = QFileDialog.getExistingDirectory(self, "ロゴ保存先を選択")
+        p = QFileDialog.getExistingDirectory(self, T("ロゴ保存先を選択"))
         if p:
             self._logo_edit.setText(p)
 
     def _clear_cache(self):
         clear_cache()
-        QMessageBox.information(self, "完了", "サムネキャッシュを削除しました")
+        QMessageBox.information(self, T("完了"), T("サムネキャッシュを削除しました"))
 
     def _save(self):
         self._result_loop = "loop" if self._rb_loop.isChecked() else "stop"
@@ -4570,12 +6179,13 @@ class SettingsDialog(QDialog):
         self._result_exts = new_exts
         self._cfg["lora_folder"] = self._lora_edit.text()
         self._cfg["logo_folder"] = self._logo_edit.text().strip()
+        self._cfg["language"] = self._lang_combo.currentData()
         self.accept()
 
     def focus_lora_tab(self):
         """LoRAタブを前面に出し、フォルダ入力欄にフォーカスを当てる。"""
-        # LoRAタブはインデックス2（FullViewer=0, 拡張子=1, LoRA=2, キャッシュ=3）
-        self._tabs.setCurrentIndex(2)
+        # LoRAタブはインデックス3（言語=0, FullViewer=1, 拡張子=2, LoRA=3, キャッシュ=4）
+        self._tabs.setCurrentIndex(3)
         self._lora_edit.setFocus()
         self._lora_edit.selectAll()
 
@@ -4635,7 +6245,7 @@ class MetaPanel(QWidget):
             f"border:none;border-top:1px solid {PAL['border']};"
             f"padding:0 8px;font-size:8pt;font-weight:bold;")
         lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        lbl.setToolTip("ダブルクリックで全コンテンツが見える高さに展開")
+        lbl.setToolTip(T("ダブルクリックで全コンテンツが見える高さに展開"))
         lbl.setCursor(Qt.CursorShape.PointingHandCursor)
         hl.addWidget(lbl)
 
@@ -4661,19 +6271,19 @@ class MetaPanel(QWidget):
             hdr._dedup_badge = badge
 
             # ── 📋 コピー(重複無し) ボタン ───────────────────────────
-            btn_dedup = QPushButton("📋 コピー(重複無し)")
+            btn_dedup = QPushButton(T("📋 コピー(重複無し)"))
             btn_dedup.setFixedSize(132, 22)
             btn_dedup.setStyleSheet(_btn_style)
-            btn_dedup.setToolTip("重複タグを削除してコピー")
+            btn_dedup.setToolTip(T("重複タグを削除してコピー"))
             btn_dedup.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn_dedup.clicked.connect(copy_dedup_fn)
             hl.addWidget(btn_dedup, 0, Qt.AlignmentFlag.AlignVCenter)
 
             # ── 📋 コピー ボタン ────────────────────────────────────
-            btn_plain = QPushButton("📋 コピー")
+            btn_plain = QPushButton(T("📋 コピー"))
             btn_plain.setFixedSize(84, 22)
             btn_plain.setStyleSheet(_btn_style)
-            btn_plain.setToolTip("そのままコピー")
+            btn_plain.setToolTip(T("そのままコピー"))
             btn_plain.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn_plain.clicked.connect(copy_plain_fn)
             hl.addWidget(btn_plain, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -4683,7 +6293,7 @@ class MetaPanel(QWidget):
             copy_btn = QPushButton("\U0001f4cb")
             copy_btn.setFixedSize(28, 22)
             copy_btn.setStyleSheet(_btn_style)
-            copy_btn.setToolTip("クリップボードにコピー")
+            copy_btn.setToolTip(T("クリップボードにコピー"))
             copy_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             copy_btn.clicked.connect(copy_fn)
             hl.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -4813,8 +6423,8 @@ class MetaPanel(QWidget):
                 "QPushButton:hover{color:" + PAL['fg0'] + ";}")
             return b
 
-        self._inner_meta_btn = _inner_tab_btn("\U0001f4cb メタ情報", checked=True)
-        self._inner_tags_btn = _inner_tab_btn("\U0001f3f7 タグ一覧", checked=False)
+        self._inner_meta_btn = _inner_tab_btn(T("\U0001f4cb メタ情報"), checked=True)
+        self._inner_tags_btn = _inner_tab_btn(T("\U0001f3f7 タグ一覧"), checked=False)
         _itb_lay.addWidget(self._inner_meta_btn)
         _itb_lay.addWidget(self._inner_tags_btn)
         _itb_lay.addStretch()
@@ -4917,7 +6527,7 @@ class MetaPanel(QWidget):
         vsplit.setStretchFactor(2, 1)
 
         # ── ヘッダーをペインの先頭に挿入（vsplit 確定後） ─────────────────
-        hdr0 = self._section_header("ファイル情報・メタ", vsplit, 0, init_sizes[0],
+        hdr0 = self._section_header(T("ファイル情報・メタ"), vsplit, 0, init_sizes[0],
                                     content_widget=sec1_content)
         hdr1 = self._section_header("✅ Positive",       vsplit, 1, init_sizes[1],
                                     copy_plain_fn=self._copy_pos_plain,
@@ -4961,7 +6571,7 @@ class MetaPanel(QWidget):
         bf.setContentsMargins(4, 4, 4, 4)
         bf.setSpacing(4)
         self._copy_seed_btn = QPushButton("🌱 Seed")
-        self._save_btn = QPushButton("💾 保存")
+        self._save_btn = QPushButton(T("💾 保存"))
         self._save_btn.setStyleSheet(
             f"background:#1e3a1e;color:{PAL['pos_fg']};"
             f"border:none;border-radius:4px;padding:4px 10px;")
@@ -4996,7 +6606,7 @@ class MetaPanel(QWidget):
             if badge_lbl is None:
                 return
             if count > 0:
-                badge_lbl.setText(f"重複{count}")
+                badge_lbl.setText(f"{Te('重複')}{count}")
                 badge_lbl.show()
             else:
                 badge_lbl.setText("")
@@ -5005,7 +6615,7 @@ class MetaPanel(QWidget):
         _update_badge(getattr(self, '_hdr_neg_badge', None), meta.get("removed_neg", 0))
 
     # ── メタ行の定義（固定行）──────────────────────────────────────────────
-    _FIXED_ROWS = ["ファイルサイズ", "解像度", "日時", "モデル",
+    _FIXED_ROWS = [T("ファイルサイズ"), T("解像度"), T("日時"), T("モデル"),
                    "Steps", "CFG", "Sampler", "Seed"]
 
     def _init_meta_rows(self):
@@ -5038,7 +6648,7 @@ class MetaPanel(QWidget):
                 ci_btn.setFixedSize(22, 22)
                 ci_btn.setStyleSheet(
                     f"background:transparent;color:{PAL['fg3']};border:none;padding:0;")
-                ci_btn.setToolTip("Civitaiで検索")
+                ci_btn.setToolTip(T("Civitaiで検索"))
                 ci_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
                 rl.addWidget(ci_btn)
                 self._meta_civ_btns[key] = ci_btn
@@ -5046,9 +6656,11 @@ class MetaPanel(QWidget):
             self._meta_row_widgets[key] = row_w
             return row_w
 
-        for key in ["ファイルサイズ", "解像度", "日時"]:
+        for key in [T("ファイルサイズ"), T("解像度"), T("日時")]:
             self._meta_layout.addWidget(_make_row(key))
-        self._meta_layout.addWidget(_make_row("モデル", clickable=True, with_civ=True))
+        self._meta_layout.addWidget(_make_row(T("モデル"), clickable=True, with_civ=True))
+        self._meta_civ_btns[T("モデル")].clicked.connect(
+            lambda checked=False: civitai_open_lora(self._meta_val_labels[T("モデル")].text(), ""))
         for key in ["Steps", "CFG", "Sampler"]:
             self._meta_layout.addWidget(_make_row(key))
         # Seed: クリックでコピー（PointerHandCursor + click）
@@ -5071,31 +6683,22 @@ class MetaPanel(QWidget):
 
         # ── 固定行を更新（ウィジェット再生成なし）──────────────────────────
         fsize = meta.get("fsize", 0)
-        lbl["ファイルサイズ"].setText(f"{fsize//1024} KB" if fsize else "?")
+        lbl[T("ファイルサイズ")].setText(f"{fsize//1024} KB" if fsize else "?")
 
-        lbl["解像度"].setText(
+        lbl[T("解像度")].setText(
             f"{meta.get('width','')}×{meta.get('height','')}" or "—")
 
-        lbl["日時"].setText(meta.get("date","") or "—")
+        lbl[T("日時")].setText(meta.get("date","") or "—")
 
         model = meta.get("model","")
-        model_lbl = lbl["モデル"]
+        model_lbl = lbl[T("モデル")]
         model_lbl.setText(model or "—")
         # モデル名クリック → model_search_requested シグナルを発火して model_cb に反映
         try: model_lbl.mousePressEvent = None
         except Exception: pass
         if model:
             model_lbl.mousePressEvent = lambda e, m=model: self.model_search_requested.emit(m)
-        if "モデル" in self._meta_civ_btns:
-            civ = self._meta_civ_btns["モデル"]
-            # シグナルを毎回再接続（lambda をリバインド）
-            try: civ.clicked.disconnect()
-            except Exception: pass
-            if model:
-                civ.clicked.connect(lambda checked=False, n=model: civitai_open_lora(n, ""))
-                civ.show()
-            else:
-                civ.hide()
+        self._meta_civ_btns[T("モデル")].setVisible(bool(model))
 
         lbl["Steps"].setText(meta.get("steps","") or "—")
         lbl["CFG"].setText(meta.get("cfg","") or "—")
@@ -5108,7 +6711,7 @@ class MetaPanel(QWidget):
         except Exception: pass
         if seed:
             # ⚠ 削除禁止: status_message.emit() でステータスバーにSeedコピー通知を表示（v1.79実装）
-            seed_lbl.mousePressEvent = lambda e, s=seed: (QApplication.clipboard().setText(s), self.status_message.emit(f"📋 Seed をコピーしました: {s}"))
+            seed_lbl.mousePressEvent = lambda e, s=seed: (QApplication.clipboard().setText(s), self.status_message.emit(f"{Te('📋 Seed をコピーしました: ')}{s}"))
         else:
             seed_lbl.mousePressEvent = None
 
@@ -5138,7 +6741,7 @@ class MetaPanel(QWidget):
             ci_btn = QPushButton("🌐"); ci_btn.setFixedSize(22, 22)
             ci_btn.setStyleSheet(
                 f"background:transparent;color:{PAL['fg3']};border:none;padding:0;")
-            ci_btn.setToolTip("Civitaiで検索")
+            ci_btn.setToolTip(T("Civitaiで検索"))
             ci_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             ci_btn.clicked.connect(lambda checked=False, n=lo: civitai_open_lora(n, ""))
             rl.addWidget(key_lbl); rl.addWidget(val_lbl, 1); rl.addWidget(ci_btn)
@@ -5156,7 +6759,7 @@ class MetaPanel(QWidget):
         text = self._txt_pos.toPlainText()
         if text:
             QApplication.clipboard().setText(text)
-            self.status_message.emit("📋 Positive をそのままコピーしました")  # ⚠ 削除禁止
+            self.status_message.emit(T("📋 Positive をそのままコピーしました"))  # ⚠ 削除禁止
 
     def _copy_pos_dedup(self):
         """Positiveプロンプトを重複タグ除去してコピー"""
@@ -5164,7 +6767,7 @@ class MetaPanel(QWidget):
         if text:
             clean, removed = dedup_tags(text)
             QApplication.clipboard().setText(clean)
-            msg = f"📋✨ Positive をコピーしました（重複{removed}個を削除）" if removed else "📋✨ Positive をコピーしました（重複なし）"
+            msg = f"{Te('📋✨ Positive をコピーしました（重複')}{removed}{Te('個を削除）')}" if removed else T("📋✨ Positive をコピーしました（重複なし）")
             self.status_message.emit(msg)  # ⚠ 削除禁止
 
     def _copy_neg_plain(self):
@@ -5172,7 +6775,7 @@ class MetaPanel(QWidget):
         text = self._txt_neg.toPlainText()
         if text:
             QApplication.clipboard().setText(text)
-            self.status_message.emit("📋 Negative をそのままコピーしました")  # ⚠ 削除禁止
+            self.status_message.emit(T("📋 Negative をそのままコピーしました"))  # ⚠ 削除禁止
 
     def _copy_neg_dedup(self):
         """Negativeプロンプトを重複タグ除去してコピー"""
@@ -5180,7 +6783,7 @@ class MetaPanel(QWidget):
         if text:
             clean, removed = dedup_tags(text)
             QApplication.clipboard().setText(clean)
-            msg = f"📋✨ Negative をコピーしました（重複{removed}個を削除）" if removed else "📋✨ Negative をコピーしました（重複なし）"
+            msg = f"{Te('📋✨ Negative をコピーしました（重複')}{removed}{Te('個を削除）')}" if removed else T("📋✨ Negative をコピーしました（重複なし）")
             self.status_message.emit(msg)  # ⚠ 削除禁止
 
     # 後方互換エイリアス（他箇所から _copy_pos/_copy_neg を呼んでいるケースに備える）
@@ -5191,7 +6794,7 @@ class MetaPanel(QWidget):
         seed = self._cur_meta.get("seed","")
         if seed:
             QApplication.clipboard().setText(seed)
-            self.status_message.emit(f"📋 Seed をコピーしました: {seed}")  # ⚠ 削除禁止
+            self.status_message.emit(f"{Te('📋 Seed をコピーしました: ')}{seed}")  # ⚠ 削除禁止
 
     def _save_png(self):
         if not self._cur_path: return
@@ -5206,7 +6809,7 @@ class MetaPanel(QWidget):
                 for k in [k for k in list(_mem) if self._cur_path in k]:
                     del _mem[k]
         except Exception as ex:
-            QMessageBox.critical(self, "保存エラー", str(ex))
+            QMessageBox.critical(self, T("保存エラー"), str(ex))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -5239,12 +6842,12 @@ class _ConsolePanel(QWidget):
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(8, 0, 4, 0)
         hl.setSpacing(6)
-        title = QLabel("📋 アクティビティログ")
+        title = QLabel(T("📋 アクティビティログ"))
         title.setStyleSheet(f"color:{PAL['fg2']};font-size:8pt;font-weight:bold;")
         hl.addWidget(title)
         hl.addStretch()
-        for label, fn, danger in [("📋 コピー", self._copy_all, False),
-                                   ("🗑 クリア",  self.clear,     True)]:
+        for label, fn, danger in [(T("📋 コピー"), self._copy_all, False),
+                                   (T("🗑 クリア"),  self.clear,     True)]:
             b = QPushButton(label)
             b.setFixedHeight(20)
             hc = PAL["red"] if danger else PAL["accent"]
@@ -5331,8 +6934,8 @@ class MainWindow(QMainWindow):
         self._layout_vsplit   = None
         self._layout_hsplit   = None
         self._delete_confirm_dialog = _DeleteConfirmDialog(
-            "削除確認",
-            "このファイルを削除しますか？",
+            T("削除確認"),
+            T("このファイルを削除しますか？"),
             permanent=False,
             parent=self,
         )
@@ -5367,6 +6970,9 @@ class MainWindow(QMainWindow):
         # キャンセル済みワーカーの参照保持リスト
         # （スレッドが自然終了するまで GC されないよう保持）
         self._old_workers: list = []
+        self._worker_cleanup_timer = QTimer(self)
+        self._worker_cleanup_timer.setInterval(100)
+        self._worker_cleanup_timer.timeout.connect(self._cleanup_retired_workers)
 
         # フィルタデバウンスタイマー
         self._filter_timer = QTimer(self)
@@ -5390,11 +6996,6 @@ class MainWindow(QMainWindow):
         # _restore_geometry() 後（ウィンドウサイズ確定後）に実行する
         # 最大化時は showMaximized() のリサイズが完了するまで少し待つ
         saved_layout = self._cfg.get("layout", "A")
-        # 旧レイアウトIDの移行
-        _migrate = {"B": "A", "C": "B"}
-        if saved_layout in _migrate:
-            saved_layout = _migrate[saved_layout]
-            self._cfg["layout"] = saved_layout
         # 起動時レイアウト復元
         # ⚠ _switch_layout ではなく _apply_layout_by_id を使うこと。
         #   _switch_layout は cfg["layout"] == layout_id で即 return するため
@@ -5478,13 +7079,41 @@ class MainWindow(QMainWindow):
         self._right_panel_w = pane_r
         self._user_collapsed_left  = False   # ユーザーが意図的に左を折りたたんだか
         self._user_collapsed_right = False   # ユーザーが意図的に右を折りたたんだか
-        # 左バーを splitter の外に固定配置する。
+        # 左右バーを splitter の外に固定配置する（バー自体は開閉でも消えない）。
+        self._right_sidebar_widget = QWidget()
+        self._right_sidebar_widget.setFixedWidth(22)
+        self._right_sidebar_widget.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self._right_sidebar_widget.setStyleSheet(
+            f"background:{PAL['bg2']};border-left:1px solid {PAL['border']};")
+        rs_layout = QVBoxLayout(self._right_sidebar_widget)
+        rs_layout.setContentsMargins(0, 0, 0, 0)
+        rs_layout.setSpacing(0)
+
+        # 縦バーボタン（クリックで右カラム全体を折りたたむ／左の ≡ と対）
+        self._right_panel_toggle_btn = QPushButton("≡")
+        self._right_panel_toggle_btn.setFixedSize(22, 80)
+        self._right_panel_toggle_btn.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._right_panel_toggle_btn.setCheckable(True)
+        self._right_panel_toggle_btn.setChecked(True)   # 初期=展開
+        self._right_panel_toggle_btn.setToolTip(T("右カラムを開閉"))
+        self._right_panel_toggle_btn.setStyleSheet(
+            f"QPushButton{{background:{PAL['bg2']};color:{PAL['fg3']};"
+            f"border:none;border-radius:0;font-size:15px;padding:0;}}"
+            f"QPushButton:hover{{background:{PAL['bg3']};color:{PAL['fg0']};}}"
+            f"QPushButton:checked{{color:{PAL['accent']};}}")
+        rs_layout.addWidget(self._right_panel_toggle_btn)
+        rs_layout.addStretch()
+        self._right_panel_toggle_btn.clicked.connect(self._toggle_right_panel)
+
         top_shell = QWidget()
         top_shell_l = QHBoxLayout(top_shell)
         top_shell_l.setContentsMargins(0, 0, 0, 0)
         top_shell_l.setSpacing(0)
         top_shell_l.addWidget(self._left_sidebar_widget)
         top_shell_l.addWidget(splitter, 1)
+        top_shell_l.addWidget(self._right_sidebar_widget)
         for handle_idx, side in ((1, "left"), (2, "right")):
             handle = splitter.handle(handle_idx)
             if handle is not None:
@@ -5557,16 +7186,18 @@ class MainWindow(QMainWindow):
         self._progress = QProgressBar()
         self._progress.setFixedWidth(200); self._progress.setFixedHeight(14)
         self._progress.hide(); self._progress.setTextVisible(False)
-        self._notice_lbl = QLabel("💡 初回読み込みはキャッシュ生成のため時間がかかります")
+        self._notice_lbl = QLabel(T("💡 初回読み込みはキャッシュ生成のため時間がかかります"))
         self._notice_lbl.setStyleSheet(f"color:{PAL['fg3']};font-size:8pt;padding:0 4px;")
         self._notice_lbl.hide()
         self._count_lbl = QLabel("")
         self._count_lbl.setStyleSheet(f"color:{PAL['fg2']};font-size:9pt;padding:0 6px;")
         self._count_lbl.setMinimumWidth(140)
-        self._count_lbl.setToolTip("表示枚数 / 総枚数")
+        self._count_lbl.setToolTip(T("表示枚数 / 総枚数"))
         self._status_bar.addWidget(self._count_lbl)
         self._status_bar.addWidget(self._progress)
         self._status_bar.addWidget(self._notice_lbl)
+        # サムネイルサイズバーはフッター右端に常設（v2.22、ツールバーから移設）
+        self._status_bar.addPermanentWidget(self._thumb_size_bar)
 
         # レイアウト復元は __init__ 末尾（_restore_geometry 後）で行う
         # ここでは何もしない
@@ -5575,114 +7206,142 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
 
         # ファイル
-        fm = mb.addMenu("ファイル(&F)")
-        fm.addAction("📂 フォルダを開く",  self._open_folder, QKeySequence("Ctrl+O"))
-        fm.addAction("🔄 再読み込み",       self._reload_folder, QKeySequence("F5"))
+        fm = mb.addMenu(T("ファイル(&F)"))
+        fm.addAction(T("📂 フォルダを開く"),  self._open_folder, QKeySequence("Ctrl+O"))
+        fm.addAction(T("🔄 再読み込み"),       self._reload_folder, QKeySequence("F5"))
         fm.addSeparator()
-        fm.addAction("⭐ ブックマーク...", self._show_bookmark_dialog, QKeySequence("Ctrl+B"))
-        fm.addAction("➕ 現在のフォルダをブックマーク", self._add_favorite)
+        fm.addAction(T("⭐ ブックマーク..."), self._show_bookmark_dialog, QKeySequence("Ctrl+B"))
+        fm.addAction(T("➕ 現在のフォルダをブックマーク"), self._add_favorite)
         fm.addSeparator()
-        fm.addAction("◀ 前のフォルダ", self._go_prev_folder, QKeySequence("Ctrl+Left"))
-        fm.addAction("▶ 次のフォルダ", self._go_next_folder, QKeySequence("Ctrl+Right"))
+        fm.addAction(T("◀ 前のフォルダ"), self._go_prev_folder, QKeySequence("Ctrl+Left"))
+        fm.addAction(T("▶ 次のフォルダ"), self._go_next_folder, QKeySequence("Ctrl+Right"))
         fm.addSeparator()
-        fm.addAction("終了", self.close, QKeySequence("Alt+F4"))
+        fm.addAction(T("終了"), self.close, QKeySequence("Alt+F4"))
 
         # 表示
-        vm = mb.addMenu("表示(&V)")
+        vm = mb.addMenu(T("表示(&V)"))
         self._view_menu = vm
-        self._subfolder_action = vm.addAction("📁 サブフォルダを含む")
+        self._subfolder_action = vm.addAction(T("📁 サブフォルダを含む"))
         self._subfolder_action.setCheckable(True)
         self._subfolder_action.setChecked(self._cfg.get("subfolder", False))
         self._subfolder_action.triggered.connect(self._reload_folder)
         vm.addSeparator()
-        self._toggle_left_action = vm.addAction("📁 フォルダパネルを表示")
+        self._toggle_left_action = vm.addAction(T("📁 フォルダパネルを表示"))
         self._toggle_left_action.setCheckable(True)
         self._toggle_left_action.setChecked(True)
         self._toggle_left_action.toggled.connect(self._toggle_left_panel)
-        self._toggle_right_action = vm.addAction("📐 メタパネルを表示")
+        self._toggle_right_action = vm.addAction(T("📐 メタパネルを表示"))
         self._toggle_right_action.setCheckable(True)
         self._toggle_right_action.setChecked(True)
         self._toggle_right_action.toggled.connect(self._toggle_right_panel)
-        self._toggle_console_action = vm.addAction("📋 アクティビティログを表示")
+        self._toggle_console_action = vm.addAction(T("📋 アクティビティログを表示"))
         self._toggle_console_action.setCheckable(True)
         self._toggle_console_action.setChecked(self._cfg.get("console_visible", False))
         self._toggle_console_action.toggled.connect(self._set_console_visible)
-        self._toggle_ruler_action = vm.addAction("📏 位置ルーラーを表示")
+        self._toggle_ruler_action = vm.addAction(T("📏 位置ルーラーを表示"))
         self._toggle_ruler_action.setCheckable(True)
         self._toggle_ruler_action.setChecked(self._cfg.get("scroll_ruler_visible", True))
         self._toggle_ruler_action.toggled.connect(self._set_scroll_ruler_visible)
-        vm.addAction("☑ 全選択",     self._select_all,   QKeySequence("Ctrl+A"))
-        vm.addAction("🔍 類似画像検索", self._find_similar)
+        vm.addAction(T("☑ 全選択"),     self._select_all,   QKeySequence("Ctrl+A"))
+        vm.addAction(T("🔍 類似画像検索"), self._find_similar)
 
         # ツール
-        tm = mb.addMenu("ツール(&T)")
-        tm.addAction("🔍 重複画像を検出", self._open_duplicate_detector)
-        tm.addAction("📊 LoRA 使用率分析", self._open_lora_stats)
-        tm.addAction("📐 パネル幅の設定", self._open_pane_dialog)
+        tm = mb.addMenu(T("ツール(&T)"))
+        tm.addAction(T("🔍 重複画像を検出"), self._open_duplicate_detector)
+        tm.addAction(T("📊 LoRA 使用率分析"), self._open_lora_stats)
+        tm.addAction(T("📐 パネル幅の設定"), self._open_pane_dialog)
         tm.addSeparator()
-        tm.addAction("🖼 全サムネイルを一括生成", self._prebuild_all_thumbs)
-        tm.addAction("🗑 メタキャッシュを初期化", self._clear_meta_cache)
+        tm.addAction(T("🖼 全サムネイルを一括生成"), self._prebuild_all_thumbs)
+        tm.addAction(T("🗑 メタキャッシュを初期化"), self._clear_meta_cache)
         tm.addSeparator()
-        tm.addAction("🗑 サムネキャッシュをクリア",
-                     lambda: (clear_cache(), QMessageBox.information(self,"完了","削除しました")))
+        tm.addAction(T("🧹 サムネキャッシュを整理（古い順に上限まで）"),
+                     self._prune_thumb_cache)
+        tm.addAction(T("💾 サムネキャッシュの保存先と容量"), self._show_thumb_cache_info)
+        tm.addAction(T("🗑 サムネキャッシュをクリア"),
+                     lambda: (clear_cache(), QMessageBox.information(self,T("完了"),T("削除しました"))))
         tm.addSeparator()
-        tm.addAction("🎨 ロゴ/タグ連動設定", self._open_overlay_tag_settings)
+        tm.addAction(T("🎨 ロゴ/タグ連動設定"), self._open_overlay_tag_settings)
+        tm.addAction(T("📊 ロード統計"), self._show_load_stats)
 
         # 設定
-        sm = mb.addMenu("設定(&S)")
-        sm.addAction("⚙ 環境設定...", self._open_settings, QKeySequence("Ctrl+,"))
+        sm = mb.addMenu(T("設定(&S)"))
+        sm.addAction(T("⚙ 環境設定..."), self._open_settings, QKeySequence("Ctrl+,"))
 
         # ヘルプ
-        hm = mb.addMenu("ヘルプ(&H)")
-        hm.addAction("F1 キーボードショートカット", self._show_shortcuts, QKeySequence("F1"))
-        hm.addAction(f"ℹ バージョン情報 {APP_VERSION}", self._show_version)
+        hm = mb.addMenu(T("ヘルプ(&H)"))
+        hm.addAction(T("F1 キーボードショートカット"), self._show_shortcuts, QKeySequence("F1"))
+        hm.addAction(f"{Te('ℹ バージョン情報 ')}{APP_VERSION}", self._show_version)
 
     def _make_toolbar_tag_group(self) -> QWidget:
-        """タグラベル・検索欄・AND を1つの塊として扱う。"""
+        """検索欄・詳細・AND を1つの塊として扱う（WM流：前置ラベルなし）"""
         group = QWidget()
+        # 🔍詳細ボタンが親レイアウトで圧迫されて消えないよう、Minimum を強制する
+        group.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         group_l = QHBoxLayout(group)
         group_l.setContentsMargins(0, 0, 0, 0)
         group_l.setSpacing(4)
 
-        tag_lbl = QLabel("タグ:")
-        tag_lbl.setStyleSheet(f"color:{PAL['fg3']};padding:0 2px;")
-        group_l.addWidget(tag_lbl)
-
         tag_search_wrap = QWidget()
         tag_search_wrap.setStyleSheet(
-            f"background:{PAL['bg2']};border:1px solid {PAL['border']};border-radius:3px;")
-        tag_search_wrap.setFixedHeight(24)
-        tag_search_wrap.setMinimumWidth(300)
+            f"background:{PAL['bg2']};border:1px solid {PAL['border']};border-radius:6px;")
+        tag_search_wrap.setFixedHeight(30)
+        tag_search_wrap.setMinimumWidth(260)
         tag_search_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         tag_search_layout = QHBoxLayout(tag_search_wrap)
         tag_search_layout.setContentsMargins(0, 0, 2, 0)
         tag_search_layout.setSpacing(0)
 
         self._search_edit = QLineEdit()
-        self._search_edit.setMinimumWidth(220)
+        self._search_edit.setMinimumWidth(120)
         self._search_edit.setMaximumWidth(16777215)
-        self._search_edit.setFixedHeight(22)
+        self._search_edit.setFixedHeight(28)
         self._search_edit.setFrame(False)
         self._search_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._search_edit.setPlaceholderText("タグを入力... 例: tag1, tag2")
+        self._search_edit.setPlaceholderText(T('検索: タグ / ファイル名 / -除外 / "完全一致"'))
+        self._search_edit.setToolTip(
+            T("タグ（プロンプト・ネガ・LoRA名）とファイル名を検索します。\n"
+            "-語 で除外、\"語\" で完全一致フレーズ。\n"
+            "検索範囲や正規表現・範囲指定は「詳細」ボタンから。"))
         self._search_edit.textChanged.connect(lambda: self._filter_timer.start())
+        self._search_edit.textEdited.connect(self._on_search_edited)
+        self._search_edit.returnPressed.connect(self._on_search_entered)
         self._search_edit.setStyleSheet(
             f"QLineEdit{{background:transparent;color:{PAL['fg1']};border:none;padding:0 6px;}}")
         tag_search_layout.addWidget(self._search_edit, 1)
 
         cl_x = QPushButton("x")
-        cl_x.setFixedSize(20, 22)
+        cl_x.setFixedSize(20, 28)
         cl_x.setStyleSheet(
             f"QPushButton{{background:transparent;color:{PAL['fg3']};border:none;padding:0;min-height:0;font-size:10pt;}}"
             f"QPushButton:hover{{color:{PAL['fg1']};}}")
         cl_x.clicked.connect(lambda: self._search_edit.clear())
         tag_search_layout.addWidget(cl_x)
+
+        # ── 詳細検索ドロップダウン (v2.10) ────────────────────────────────
+        self._adv_btn = QPushButton(T("🔍詳細"))
+        # 「🔍詳細●」の実測必要幅 60px（QFontMetrics+余白）に対し 52px では ● が切れて
+        # 見えた（＝条件が効いているのに分かっていなかった）。シフトしないよう固定幅のまま拡張。
+        self._adv_btn.setFixedSize(68, 28)
+        self._adv_btn.setCheckable(True)
+        self._adv_btn.setToolTip(
+            T("詳細検索: 検索範囲 / 除外語・フレーズ / 正規表現 /\n"
+            "日付・解像度・サイズ範囲 / Seed・Sampler・Steps・CFG / 検索履歴"))
+        self._adv_btn.setStyleSheet(
+            f"QPushButton{{background:transparent;color:{PAL['fg3']};border:none;"
+            f"border-left:1px solid {PAL['border']};padding:0 4px;font-size:8pt;min-height:0;}}"
+            f"QPushButton:hover{{color:{PAL['fg1']};}}"
+            f"QPushButton:checked{{color:{PAL['accent']};background:{PAL['bg3']};}}")
+        self._adv_btn.clicked.connect(self._toggle_adv_popup)
+        tag_search_layout.addWidget(self._adv_btn)
         group_l.addWidget(tag_search_wrap, 1)
 
         self._tag_and_cb = QCheckBox("AND")
-        self._tag_and_cb.setToolTip("オンで、カンマ区切りの全タグを含む画像だけ表示します")
+        self._tag_and_cb.setToolTip(T("オンで、カンマ区切りの全タグを含む画像だけ表示します"))
+        self._tag_and_cb.setChecked(bool(self._cfg.get("tag_and", False)))
         self._tag_and_cb.toggled.connect(lambda: self._filter_timer.start())
         group_l.addWidget(self._tag_and_cb)
+
+        self._search_edit.installEventFilter(self)
         return group
 
     def _make_toolbar_address_group(self) -> QWidget:
@@ -5695,8 +7354,8 @@ class MainWindow(QMainWindow):
 
         path_wrap = QWidget()
         path_wrap.setStyleSheet(
-            f"background:{PAL['bg2']};border:1px solid {PAL['border']};border-radius:3px;")
-        path_wrap.setFixedHeight(24)
+            f"background:{PAL['bg2']};border:1px solid {PAL['border']};border-radius:6px;")
+        path_wrap.setFixedHeight(30)
         path_wrap.setMinimumWidth(180)
         path_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         path_layout = QHBoxLayout(path_wrap)
@@ -5704,8 +7363,8 @@ class MainWindow(QMainWindow):
         path_layout.setSpacing(0)
 
         self._path_edit = QLineEdit()
-        self._path_edit.setPlaceholderText("フォルダパスを入力して Enter")
-        self._path_edit.setFixedHeight(22)
+        self._path_edit.setPlaceholderText(T("フォルダパスを入力して Enter"))
+        self._path_edit.setFixedHeight(28)
         self._path_edit.setFrame(False)
         self._path_edit.setMinimumWidth(120)
         self._path_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -5715,7 +7374,7 @@ class MainWindow(QMainWindow):
         path_layout.addWidget(self._path_edit, 1)
 
         path_x = QPushButton("x")
-        path_x.setFixedSize(20, 22)
+        path_x.setFixedSize(20, 28)
         path_x.setStyleSheet(
             f"QPushButton{{background:transparent;color:{PAL['fg3']};border:none;padding:0;min-height:0;font-size:10pt;}}"
             f"QPushButton:hover{{color:{PAL['fg1']};}}")
@@ -5726,18 +7385,19 @@ class MainWindow(QMainWindow):
         return group
 
     def _build_toolbar(self):
-        tb = QToolBar("メイン"); tb.setMovable(False); tb.setIconSize(QSize(16,16))
+        tb = QToolBar(T("メイン")); tb.setMovable(False); tb.setIconSize(QSize(16,16))
         tb.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)
         self._tool_bar = tb  # トースト位置計算用
         self.addToolBar(tb)
         if hasattr(self, "_view_menu"):
             self._toggle_toolbar_action = tb.toggleViewAction()
-            self._toggle_toolbar_action.setText("🧰 ツールバーを表示")
+            self._toggle_toolbar_action.setText(T("🧰 ツールバーを表示"))
             self._view_menu.insertAction(self._toggle_console_action, self._toggle_toolbar_action)
         host = _ToolbarHost()
         host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         host_layout = QVBoxLayout(host)
-        host_layout.setContentsMargins(4, 1, 10, 1)
+        # Wildcard Manager の topControls に合わせる（margins 4,2,4,2 / 間隔6）
+        host_layout.setContentsMargins(4, 2, 4, 2)
         host_layout.setSpacing(2)
         host_layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         self._toolbar_row1_widget = QWidget()
@@ -5759,7 +7419,9 @@ class MainWindow(QMainWindow):
         tb.addWidget(host)
         self._toolbar_primary_items = []
         self._toolbar_secondary_items = []
-        self._toolbar_wrap_threshold = 1900
+        # 1行の最小必要幅は実測1145px（.tmp/v222_footer_probe.py、サイズバーはフッターへ移設済み）。
+        # 余裕 ~95px を見て折返し閾値を 1420 → 1240 へ下げ、一般的なノート幅でも1行に収める。
+        self._toolbar_wrap_threshold = 1240
         self._toolbar_seq = 0
 
         def add_w(w, row=1, stretch=0, order=None):
@@ -5773,16 +7435,9 @@ class MainWindow(QMainWindow):
             if order is not None:
                 w.setProperty("_toolbar_order", order)
 
-        def add_sep(row=1):
-            sep = QFrame()
-            sep.setFrameShape(QFrame.Shape.VLine)
-            sep.setStyleSheet(f"color:{PAL['border']};")
-            sep.setFixedWidth(1)
-            add_w(sep, row=row)
-
         combo_ss = (
             f"QComboBox{{background:{PAL['bg2']};color:{PAL['fg1']};"
-            f"border:1px solid {PAL['border']};border-radius:3px;padding:0 6px;}}"
+            f"border:1px solid {PAL['border']};border-radius:6px;padding:0 6px;}}"
             f"QComboBox:hover{{border-color:{PAL['accent']};}}"
             f"QComboBox:focus{{border-color:{PAL['accent']};}}"
             f"QComboBox::drop-down{{subcontrol-origin:padding;subcontrol-position:top right;"
@@ -5792,38 +7447,35 @@ class MainWindow(QMainWindow):
             f"border:1px solid {PAL['border']};selection-background-color:{PAL['sel']};}}"
         )
 
-        # ── パネル表示切り替えボタン ──────────────────────────────────────
-        def panel_toggle_btn(text, checked=True):
+        # ── パネル表示切り替えボタン（WM流：右端のアイコンのみ四角）──────
+        # ▶（右パネル）は v2.20、◀（左パネル）は v2.21 で各々の縦バー ≡ に移したため削除。
+        #    右パネルは 右端 ≡ と「📐 メタパネルを表示」、
+        #    左パネルは 左端 ≡ と「📁 フォルダパネルを表示」の2経路。
+        def panel_toggle_btn(text, tip, checked=True):
             b = QPushButton(text)
             b.setCheckable(True); b.setChecked(checked)
-            b.setFixedHeight(26)
+            b.setFixedSize(36, 36)
+            b.setToolTip(tip)
             b.setObjectName("panel_toggle_btn")
+            b.setStyleSheet(
+                f"QPushButton{{background:{PAL['bg2']};color:{PAL['fg2']};"
+                f"border:1px solid {PAL['border']};border-radius:6px;"
+                f"padding:0;min-height:0;font-size:11pt;}}"
+                f"QPushButton:hover{{border-color:{PAL['accent']};color:{PAL['fg1']};}}"
+                f"QPushButton:checked{{background:{PAL['bg3']};color:{PAL['accent']};"
+                f"border-color:{PAL['accent']};}}")
             return b
 
-        self._toggle_left_btn  = panel_toggle_btn("◀ フォルダ")
-        self._toggle_right_btn = panel_toggle_btn("メタ ▶")
-        self._toggle_left_btn.clicked.connect(self._toggle_left_panel)
-        self._toggle_right_btn.clicked.connect(self._toggle_right_panel)
-        add_w(self._toggle_right_btn, row=2, order=10000)
-
         # ログボタン
-        self._log_toggle_btn = QPushButton("📋 ログ")
-        self._log_toggle_btn.setCheckable(True)
-        self._log_toggle_btn.setChecked(self._cfg.get("console_visible", False))
-        self._log_toggle_btn.setFixedHeight(26)
-        self._log_toggle_btn.setMinimumWidth(60)
-        self._log_toggle_btn.setObjectName("panel_toggle_btn")
-        self._log_toggle_btn.setToolTip("アクティビティログを表示/非表示")
+        self._log_toggle_btn = panel_toggle_btn(
+            "☰", T("アクティビティログを表示/非表示"),
+            checked=bool(self._cfg.get("console_visible", False)))
         self._log_toggle_btn.toggled.connect(self._set_console_visible)
+        add_w(self._log_toggle_btn, row=2, order=8000)
 
-        add_sep(row=1)
-
-        # ── 並び替え ──────────────────────────────────────────────────────
-        sort_lbl = QLabel("並び替え:")
-        sort_lbl.setStyleSheet(f"color:{PAL['fg3']};padding:0 2px;")
-        add_w(sort_lbl, row=1)
-
-        self._sort_cb = QComboBox(); self._sort_cb.setFixedWidth(92); self._sort_cb.setFixedHeight(24)
+        # ── 並び替え（WM流：前置ラベルなし、意味は tooltip と表示値に載せる）──
+        self._sort_cb = QComboBox(); self._sort_cb.setFixedWidth(96); self._sort_cb.setFixedHeight(30)
+        self._sort_cb.setToolTip(T("並び替えの基準"))
         self._sort_cb.setStyleSheet(combo_ss)
         for k, v in SORT_KEYS: self._sort_cb.addItem(v, k)
         saved_key = self._cfg.get("sort_key","name")
@@ -5833,14 +7485,15 @@ class MainWindow(QMainWindow):
         self._sort_cb.currentIndexChanged.connect(self._apply_filter)
         add_w(self._sort_cb, row=1)
 
-        self._sort_dir_btn = QPushButton("↑昇順")
+        self._sort_dir_btn = QPushButton(T("↑昇順"))
         self._sort_dir_btn.setCheckable(True)
         self._sort_dir_btn.setChecked(self._cfg.get("sort_rev", False))
-        self._sort_dir_btn.setFixedWidth(50)
-        self._sort_dir_btn.setFixedHeight(24)
+        self._sort_dir_btn.setFixedWidth(56)
+        self._sort_dir_btn.setFixedHeight(30)
+        self._sort_dir_btn.setToolTip(T("昇順/降順を切り替え"))
         self._sort_dir_btn.setStyleSheet(
             f"QPushButton{{background:{PAL['bg2']};color:{PAL['fg1']};"
-            f"border:1px solid {PAL['border']};border-radius:3px;padding:0 8px;min-height:0;}}"
+            f"border:1px solid {PAL['border']};border-radius:6px;padding:0 8px;min-height:0;}}"
             f"QPushButton:hover{{border-color:{PAL['accent']};}}"
             f"QPushButton:checked{{background:{PAL['bg3']};color:{PAL['accent']};border-color:{PAL['border']};}}"
         )
@@ -5848,28 +7501,21 @@ class MainWindow(QMainWindow):
         self._update_sort_dir_btn()
         add_w(self._sort_dir_btn, row=1)
 
-        add_sep(row=1)
-
         # ── タグ検索 ──────────────────────────────────────────────────────
         add_w(self._make_toolbar_tag_group(), row=1, stretch=2, order=-900)
 
-        add_sep(row=1)
-
         # ── Model フィルタ ────────────────────────────────────────────────
-        model_lbl = QLabel("Model:")
-        model_lbl.setStyleSheet(f"color:{PAL['fg3']};padding:0 2px;")
-        add_w(model_lbl, row=1)
-
         model_wrap = QWidget()
         model_wrap.setStyleSheet(
-            f"background:{PAL['bg2']};border:1px solid {PAL['border']};border-radius:3px;")
-        model_wrap.setFixedHeight(24)
-        model_wrap.setFixedWidth(140)
+            f"background:{PAL['bg2']};border:1px solid {PAL['border']};border-radius:6px;")
+        model_wrap.setFixedHeight(30)
+        model_wrap.setFixedWidth(150)
+        model_wrap.setToolTip(T("チェックポイント名で絞り込み"))
         model_layout = QHBoxLayout(model_wrap)
         model_layout.setContentsMargins(0, 0, 2, 0)
         model_layout.setSpacing(0)
 
-        self._model_cb = QComboBox(); self._model_cb.setFixedWidth(116); self._model_cb.setFixedHeight(22)
+        self._model_cb = QComboBox(); self._model_cb.setFixedWidth(124); self._model_cb.setFixedHeight(28)
         self._model_cb.setStyleSheet(
             f"QComboBox{{background:transparent;color:{PAL['fg1']};border:none;padding:0 6px;}}"
             f"QComboBox::drop-down{{border:none;width:18px;}}"
@@ -5878,21 +7524,28 @@ class MainWindow(QMainWindow):
             f"selection-background-color:{PAL['bg3']};selection-color:{PAL['fg0']};"
             f"border:1px solid {PAL['border']};}}"
         )
-        self._model_cb.addItem(""); self._model_cb.setEditable(False)
+        self._model_cb.setEditable(False)
+        # 前置ラベルを廃止したので、未選択は placeholder で示す（実測: index0 の空アイテムでは
+        # placeholder は描画されず、currentIndex=-1 のときだけ出る。よって空アイテムは作らない）
+        self._model_cb.setPlaceholderText(T("モデル"))
+        self._model_cb.setCurrentIndex(-1)
         self._model_cb.currentIndexChanged.connect(lambda: self._filter_timer.start())
         model_layout.addWidget(self._model_cb, 1)
 
-        ml_x = QPushButton("x"); ml_x.setFixedSize(20, 22)
+        ml_x = QPushButton("x"); ml_x.setFixedSize(20, 28)
         ml_x.setStyleSheet(
             f"QPushButton{{background:transparent;color:{PAL['fg3']};border:none;padding:0;min-height:0;font-size:10pt;}}"
             f"QPushButton:hover{{color:{PAL['fg1']};}}")
-        ml_x.clicked.connect(lambda: self._model_cb.setCurrentIndex(0))
+        ml_x.clicked.connect(lambda: self._model_cb.setCurrentIndex(-1))
         model_layout.addWidget(ml_x)
         add_w(model_wrap, row=1)
 
+        # ── Seed検索: 詳細検索パネルへ配置 (v2.10) ────────────────────────
+        # ツールバーからは再度非表示のまま、_build_adv_search_popup() が
+        # seed_wrap をパネル内へ配置する。ツールバーへ戻す場合は add_w するだけでよい。
         seed_lbl = QLabel("Seed:")
         seed_lbl.setStyleSheet(f"color:{PAL['fg3']};padding:0 2px;")
-        add_w(seed_lbl, row=2)
+        seed_lbl.hide()
 
         seed_wrap = QWidget()
         seed_wrap.setStyleSheet(
@@ -5908,7 +7561,8 @@ class MainWindow(QMainWindow):
         self._seed_search_edit.setFixedHeight(22)
         self._seed_search_edit.setFrame(False)
         self._seed_search_edit.setPlaceholderText("seed...")
-        self._seed_search_edit.textChanged.connect(lambda: self._filter_timer.start())
+        # 変更を _on_adv_changed に流す（● 表示と _cfg 反映も一緒に更新する）
+        self._seed_search_edit.textChanged.connect(self._on_adv_changed)
         self._seed_search_edit.setStyleSheet(
             f"QLineEdit{{background:transparent;color:{PAL['fg1']};border:none;padding:0 6px;}}")
         seed_layout.addWidget(self._seed_search_edit, 1)
@@ -5919,74 +7573,593 @@ class MainWindow(QMainWindow):
             f"QPushButton:hover{{color:{PAL['fg1']};}}")
         sd_x.clicked.connect(lambda: self._seed_search_edit.clear())
         seed_layout.addWidget(sd_x)
-        add_w(seed_wrap, row=2)
+        seed_wrap.hide()
+        self._seed_lbl = seed_lbl
+        self._seed_wrap = seed_wrap
+        # ※ add_w(seed_lbl / seed_wrap) はしない = ツールバーに表示しない
 
-        add_sep(row=2)
+        # ── モデル系統フィルタ（チェックポイントの大括り）─────────────────
+        self._base_model_cb = QComboBox()
+        self._base_model_cb.setFixedWidth(116)
+        self._base_model_cb.setFixedHeight(30)
+        self._base_model_cb.setStyleSheet(combo_ss)
+        for _key, _label in BASE_MODEL_GROUPS:
+            self._base_model_cb.addItem(_label, _key)
+        self._base_model_cb.setToolTip(T("チェックポイントの系統で絞り込み"))
+        self._base_model_cb.currentIndexChanged.connect(lambda: self._filter_timer.start())
+        add_w(self._base_model_cb, row=2)
 
         # ── レーティング ────────────────────────────────────────────────
-        rating_lbl = QLabel("☆:")
-        rating_lbl.setStyleSheet(f"color:{PAL['fg3']};padding:0 2px;")
-        add_w(rating_lbl, row=1)
-
-        self._rating_cb = QComboBox(); self._rating_cb.setFixedWidth(52); self._rating_cb.setFixedHeight(24)
+        self._rating_cb = QComboBox(); self._rating_cb.setFixedWidth(62); self._rating_cb.setFixedHeight(30)
+        self._rating_cb.setToolTip(T("★評価で絞り込み"))
         self._rating_cb.setStyleSheet(combo_ss)
-        for v in ["all","★5","★4+","★3+","★2+","★1+","未評価"]:
+        for v in ["all","★5","★4+","★3+","★2+","★1+",T("未評価")]:
             self._rating_cb.addItem(v)
         self._rating_cb.currentIndexChanged.connect(lambda: self._filter_timer.start())
         add_w(self._rating_cb, row=1)
 
-        add_sep(row=1)
-
         # ── アドレスバー（編集可能・Enter でフォルダ移動）────────────────
         add_w(self._make_toolbar_address_group(), row=1, stretch=3, order=-1000)
 
-        add_sep(row=2)
-
-        # ── レイアウト選択ボタン ──────────────────────────────────────────
-        layout_lbl = QLabel("表示:")
-        layout_lbl.setStyleSheet(f"color:{PAL['fg3']};padding:0 2px;")
-        add_w(layout_lbl, row=2)
-
-        self._layout_btns = {}
+        # ── レイアウト選択プルダウン ──────────────────────────────────────
+        self._layout_btns = {}  # 互換用に残す（旧ボタン参照があっても落ちないように）
         layouts = [
-            ("A", "小",   "右パネル（デフォルト）\nグリッド右にプレビュー＋メタ情報"),
-            ("B", "左",   "左右分割・プレビュー左\n左に大プレビュー、右にグリッド"),
-            ("C", "右",   "左右分割・プレビュー右\n左にグリッド、右に大プレビュー"),
-            ("D", "上",   "上部プレビュー\n上部に大プレビュー、下部にサムネ帯"),
-            ("E", "全",   "全画面\nグリッド全画面"),
+            ("A", T("小"),   T("右パネル（デフォルト）\nグリッド右にプレビュー＋メタ情報")),
+            ("B", T("左"),   T("左右分割・プレビュー左\n左に大プレビュー、右にグリッド")),
+            ("C", T("右"),   T("左右分割・プレビュー右\n左にグリッド、右に大プレビュー")),
+            ("D", T("上"),   T("上部プレビュー\n上部に大プレビュー、下部にサムネ帯")),
+            ("E", T("全"),   T("全画面\nグリッド全画面")),
         ]
         cur_layout = self._cfg.get("layout","A")
-        # 旧レイアウトIDの移行
-        _migrate = {"B": "A", "C": "B"}
-        if cur_layout in _migrate:
-            cur_layout = _migrate[cur_layout]
-            self._cfg["layout"] = cur_layout
+        self._layout_combo = QComboBox()
+        self._layout_combo.setFixedWidth(76)
+        self._layout_combo.setFixedHeight(30)
+        self._layout_combo.setToolTip(T("表示レイアウト切り替え"))
+        self._layout_combo.setStyleSheet(combo_ss)
         for lid, label, tip in layouts:
-            b = QPushButton(label)
-            b.setFixedSize(36, 26)
-            b.setCheckable(False)   # ⚠ True にしない: Qtの自動トグルが checked を勝手に反転させてハイライトが消える
-            b.setProperty("active", "true" if lid == cur_layout else "false")
-            b.setToolTip(tip)
-            b.setObjectName("layout_btn")
-            b.pressed.connect(lambda l=lid: self._switch_layout(l))
-            add_w(b, row=2)
-            self._layout_btns[lid] = b
+            self._layout_combo.addItem(label, lid)
+            idx = self._layout_combo.count() - 1
+            self._layout_combo.setItemData(idx, tip, Qt.ItemDataRole.ToolTipRole)
+        for i in range(self._layout_combo.count()):
+            if self._layout_combo.itemData(i) == cur_layout:
+                self._layout_combo.blockSignals(True)
+                self._layout_combo.setCurrentIndex(i)
+                self._layout_combo.blockSignals(False)
+                break
+        self._layout_combo.setToolTip(T("表示レイアウト切り替え"))
+        self._layout_combo.currentIndexChanged.connect(self._on_layout_combo_changed)
+        add_w(self._layout_combo, row=2)
 
         # 拡張子インジケーター
         self._ext_btn = QPushButton(self._ext_indicator_text())
         self._ext_btn.setStyleSheet(f"background:transparent;color:{PAL['fg3']};border:none;padding:0 4px;font-size:8pt;")
         self._ext_btn.clicked.connect(self._open_settings)
-        self._ext_btn.setToolTip("クリックで拡張子設定を開く")
+        self._ext_btn.setToolTip(T("クリックで拡張子設定を開く"))
         self._ext_btn.hide()
-        self._reflow_toolbar()
 
-        # 内部スライダー（非表示・状態管理用）
+        # ── サムネイルサイズバー（v2.19 で前面化 / v2.22 でフッターへ移設）──
+        # 従来は「内部スライダー（非表示・状態管理用）」で、Ctrl+ホイールでしか
+        # 変更できなかった。同じ _size_slider を前面へ出すため、バーで動かしても
+        # ホイールで変えてもレイアウトDの一時変更でも、表示値は常に一致する。
+        # v2.22: ツールバーから外し、ステータスバー（フッター）右端へ常設する。
+        #        ここでは生成のみ行い、配置は _build_ui のステータスバー組立側で行う。
         self._size_slider = QSlider(Qt.Orientation.Horizontal)
         self._size_slider.setRange(60, 300)
-        self._size_slider.setValue(self._cfg.get("thumb_size", 160))
-        self._size_slider.hide()
-        self._size_lbl = QLabel(); self._size_lbl.hide()
+        self._size_slider.setFixedWidth(140)
+        self._size_slider.setFixedHeight(22)
+        self._size_slider.setToolTip(
+            T("サムネイルサイズ（60〜300px）\nグリッド上では Ctrl+ホイール でも変更できます"))
+        self._size_lbl = QLabel("")
+        self._size_lbl.setFixedWidth(38)
+        self._size_lbl.setStyleSheet(f"color:{PAL['fg3']};font-size:8pt;")
+        self._size_lbl.setToolTip(self._size_slider.toolTip())
+        size_wrap = QWidget()
+        size_wrap.setObjectName("thumb_size_bar")
+        size_wrap.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        sw_layout = QHBoxLayout(size_wrap)
+        sw_layout.setContentsMargins(6, 0, 6, 0)
+        sw_layout.setSpacing(4)
+        size_icon = QLabel("▦")
+        size_icon.setStyleSheet(f"color:{PAL['fg3']};font-size:10pt;")
+        sw_layout.addWidget(size_icon)
+        sw_layout.addWidget(self._size_slider)
+        sw_layout.addWidget(self._size_lbl)
+        self._thumb_size_bar = size_wrap   # ツールバーには add_w しない（フッターへ）
+
+        # connect を先に張ってから setValue すると、初期値がラベルにも反映される
+        # （従来は hide していたのでラベル空のままでも気づかなかった）
         self._size_slider.valueChanged.connect(self._on_size_change)
+        self._size_slider.setValue(self._cfg.get("thumb_size", 160))
+        self._reflow_toolbar()
+
+        # 詳細検索ドロップダウン（_seed_wrap 作成後に構築する必要がある）
+        self._build_adv_search_popup()
+
+    # ══ 詳細検索パネル (v2.10) ══════════════════════════════════════════════
+    def _build_adv_search_popup(self):
+        """タグ検索欄の「🔍詳細」ボタンで開くドロップダウンパネルを作る。
+
+        QMenu/QWidgetAction ではなく Qt.WindowType.Popup の QFrame を使う。
+        理由: QMenu は内包した QComboBox/QDateEdit のカレンダー等のサブポップアップが
+        開いた瞬間に閉じてしまうため、本パネルはコンボを使わず
+        QLineEdit / QSpinBox / QCheckBox / QListWidget のみで構成している。
+        Qt.Popup なのでパネル外のクリック・Esc で自動的に閉じる。
+        """
+        popup = QFrame(self)
+        popup.setWindowFlags(Qt.WindowType.Popup)
+        popup.setObjectName("adv_search_popup")
+        popup.setMinimumWidth(470)
+        popup.setStyleSheet(
+            f"QFrame#adv_search_popup{{background:{PAL['bg1']};"
+            f"border:1px solid {PAL['border']};border-radius:6px;}}"
+            f"QLabel,QCheckBox{{background:transparent;}}"
+            f"QLineEdit,QSpinBox,QDoubleSpinBox{{background:{PAL['bg2']};"
+            f"border:1px solid {PAL['border']};border-radius:3px;"
+            f"padding:2px 6px;color:{PAL['fg1']};min-height:18px;}}"
+            f"QLineEdit:focus,QSpinBox:focus,QDoubleSpinBox:focus{{border-color:{PAL['accent']};}}"
+            f"QListWidget{{background:{PAL['bg2']};border:1px solid {PAL['border']};}}"
+            f"QPushButton{{background:{PAL['bg3']};color:{PAL['fg1']};"
+            f"border:1px solid {PAL['border']};border-radius:3px;padding:3px 10px;min-height:18px;}}"
+            f"QPushButton:hover{{border-color:{PAL['accent']};}}"
+        )
+        self._adv_popup = popup
+        popup.installEventFilter(self)   # 外部クリック等で閉じた時のボタン状態リセット用
+
+        root = QVBoxLayout(popup)
+        root.setContentsMargins(10, 8, 10, 10)
+        root.setSpacing(7)
+
+        def _sec(text: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setStyleSheet(f"color:{PAL['fg2']};font-size:8pt;font-weight:bold;")
+            root.addWidget(lbl)
+            return lbl
+
+        def _lbl(text: str, tip: str = "") -> QLabel:
+            l = QLabel(text)
+            l.setStyleSheet(f"color:{PAL['fg3']};")
+            if tip:
+                l.setToolTip(tip)
+            return l
+
+        def _line(placeholder: str, width: int = 0) -> QLineEdit:
+            le = QLineEdit()
+            le.setPlaceholderText(placeholder)
+            if width:
+                le.setFixedWidth(width)
+            le.textChanged.connect(self._on_adv_changed)
+            return le
+
+        def _spin(lo, hi, suffix="", decimals=0):
+            sb = QSpinBox() if decimals == 0 else QDoubleSpinBox()
+            sb.setRange(lo, hi)
+            if decimals:
+                sb.setDecimals(decimals)
+                sb.setSingleStep(0.5)
+            sb.setSpecialValueText(T("指定なし"))
+            if suffix:
+                sb.setSuffix(suffix)
+            sb.setFixedWidth(104)
+            sb.valueChanged.connect(self._on_adv_changed)
+            return sb
+
+        # ── ヘッダ ───────────────────────────────────────────────────────
+        hdr = QHBoxLayout()
+        title = QLabel(T("🔍 詳細検索"))
+        title.setStyleSheet(f"color:{PAL['fg0']};font-weight:bold;font-size:10pt;")
+        hdr.addWidget(title)
+        hdr.addStretch()
+        hint = QLabel(T("検索バーの条件に追加して適用"))
+        hint.setStyleSheet(f"color:{PAL['fg3']};font-size:8pt;")
+        hdr.addWidget(hint)
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(22, 22)
+        # ⚠ パネル共通 QSS の padding:3px 10px を引き継ぐと、22px 幅では ✕ が
+        # ギリギリ描画されず「閉じるボタンが見えない」状態になった（実測で空白、
+        # padding:0 にすると表示される）。明示的に上書きする。
+        close_btn.setStyleSheet(
+            f"QPushButton{{background:{PAL['bg3']};color:{PAL['fg2']};"
+            f"border:1px solid {PAL['border']};border-radius:3px;"
+            f"padding:0px;min-height:0px;min-width:0px;}}"
+            f"QPushButton:hover{{border-color:{PAL['accent']};color:{PAL['fg0']};}}")
+        close_btn.setToolTip(T("閉じる (Esc)"))
+        close_btn.clicked.connect(popup.hide)
+        hdr.addWidget(close_btn)
+        root.addLayout(hdr)
+
+        # ── 検索範囲 ─────────────────────────────────────────────────────
+        _sec(T("検索範囲（検索バーの照合対象）"))
+        scope_grid = QGridLayout()
+        scope_grid.setSpacing(6)
+        self._adv_scope: dict[str, QCheckBox] = {}
+        scope_items = [
+            ("tags",     T("タグ (プロンプト/ネガ/LoRA)")),
+            ("filename", T("ファイル名")),
+            ("model",    T("モデル名")),
+            ("params",   T("生成パラメータ")),
+            ("raw",      T("raw 文字列")),
+        ]
+        for i, (key, label) in enumerate(scope_items):
+            cb = QCheckBox(label)
+            cb.toggled.connect(self._on_adv_changed)
+            self._adv_scope[key] = cb
+            scope_grid.addWidget(cb, i // 2, i % 2)
+        root.addLayout(scope_grid)
+
+        # ── 構文 ─────────────────────────────────────────────────────────
+        _sec(T("構文"))
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(8)
+        self._adv_regex = QCheckBox(T("正規表現として解釈"))
+        self._adv_regex.setToolTip(
+            T("検索バーの入力を正規表現として扱います。\n"
+            "不正な式の場合は警告を表示し、通常の部分一致検索にフォールバックします。"))
+        self._adv_regex.toggled.connect(self._on_adv_changed)
+        mode_row.addWidget(self._adv_regex)
+        syntax_lbl = QLabel(T('"完全一致" / -除外語 は正規表現モード以外で有効'))
+        syntax_lbl.setStyleSheet(f"color:{PAL['fg3']};font-size:8pt;")
+        mode_row.addWidget(syntax_lbl)
+        mode_row.addStretch()
+        root.addLayout(mode_row)
+
+        # ── 範囲指定 ─────────────────────────────────────────────────────
+        _sec(T("範囲指定"))
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
+
+        # 日付
+        grid.addWidget(_lbl(T("日付"), T("ファイルの更新日時 (mtime) 基準\n"
+                                  "入力可: 2026-01-05 / 2026/1/5 / 20260105 / 2026-01（月）/ 2026（年）")),
+                       0, 0)
+        self._adv_date_from = _line(T("開始 2026-01-01"), 132)
+        self._adv_date_to = _line(T("終了 2026-12-31"), 132)
+        self._adv_date_from.setToolTip(T("年/月/日・年-月・年のみの入力も正規化して受け付けます"))
+        self._adv_date_to.setToolTip(T("年/月/日・年-月・年のみの入力も正規化して受け付けます"
+                                     "（月・年のみは最終日に展開）"))
+        grid.addWidget(self._adv_date_from, 0, 1)
+        grid.addWidget(QLabel("〜"), 0, 2)
+        grid.addWidget(self._adv_date_to, 0, 3)
+        grid.setColumnStretch(4, 1)
+
+        # 解像度（短辺）
+        grid.addWidget(_lbl(T("解像度"), T("短辺(px) の範囲。寸法が不明な画像は除外されます")), 1, 0)
+        self._adv_res_min = _spin(0, 32767, " px")
+        self._adv_res_max = _spin(0, 32767, " px")
+        grid.addWidget(self._adv_res_min, 1, 1)
+        grid.addWidget(QLabel("〜"), 1, 2)
+        grid.addWidget(self._adv_res_max, 1, 3)
+
+        # ファイルサイズ
+        grid.addWidget(_lbl(T("サイズ"), T("ファイルサイズ(MB) の範囲")), 2, 0)
+        self._adv_size_min = _spin(0.0, 9999.0, " MB", decimals=1)
+        self._adv_size_max = _spin(0.0, 9999.0, " MB", decimals=1)
+        grid.addWidget(self._adv_size_min, 2, 1)
+        grid.addWidget(QLabel("〜"), 2, 2)
+        grid.addWidget(self._adv_size_max, 2, 3)
+
+        # Steps
+        grid.addWidget(_lbl("Steps", T("生成ステップ数の範囲。値が不明な画像は除外されます")), 3, 0)
+        self._adv_steps_min = _spin(0, 999)
+        self._adv_steps_max = _spin(0, 999)
+        grid.addWidget(self._adv_steps_min, 3, 1)
+        grid.addWidget(QLabel("〜"), 3, 2)
+        grid.addWidget(self._adv_steps_max, 3, 3)
+
+        # CFG
+        grid.addWidget(_lbl("CFG", T("CFG scale の範囲。値が不明な画像は除外されます")), 4, 0)
+        self._adv_cfg_min = _spin(0.0, 30.0, decimals=1)
+        self._adv_cfg_max = _spin(0.0, 30.0, decimals=1)
+        grid.addWidget(self._adv_cfg_min, 4, 1)
+        grid.addWidget(QLabel("〜"), 4, 2)
+        grid.addWidget(self._adv_cfg_max, 4, 3)
+
+        # Seed（ツールバーから一時退避していた検索欄をここに配置）
+        grid.addWidget(_lbl("Seed", T("Seed の部分一致")), 5, 0)
+        self._seed_wrap.show()
+        # ツールバー用に固定していた内側の QLineEdit（80×22）を、パネル内で伸びるように
+        # 解除する。wrap だけ広げても内側が固定のままだと右側が空き、高さも他行とずれる。
+        self._seed_wrap.setMinimumWidth(140)
+        self._seed_wrap.setMaximumWidth(16777215)
+        self._seed_wrap.setFixedHeight(28)
+        self._seed_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._seed_search_edit.setMinimumWidth(110)
+        self._seed_search_edit.setMaximumWidth(16777215)
+        self._seed_search_edit.setFixedHeight(26)
+        self._seed_search_edit.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                             QSizePolicy.Policy.Fixed)
+        grid.addWidget(self._seed_wrap, 5, 1, 1, 3)
+
+        # Sampler
+        grid.addWidget(_lbl("Sampler", T("Sampler 名の部分一致（大文字小文字無視）")), 6, 0)
+        self._adv_sampler = _line(T("例: DPM++ 2M"))
+        self._adv_sampler.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        grid.addWidget(self._adv_sampler, 6, 1, 1, 3)
+        root.addLayout(grid)
+
+        # ── 検索履歴 ─────────────────────────────────────────────────────
+        _sec(T("検索履歴（クリックで再実行 / 検索欄で ↑↓ キー）"))
+        hist_row = QHBoxLayout()
+        hist_row.setSpacing(6)
+        self._history_list = QListWidget()
+        self._history_list.setFixedHeight(86)
+        self._history_list.itemClicked.connect(self._on_history_item_clicked)
+        hist_row.addWidget(self._history_list, 1)
+        hist_col = QVBoxLayout()
+        hist_col.setSpacing(4)
+        clear_hist_btn = QPushButton(T("履歴をクリア"))
+        clear_hist_btn.setFixedHeight(24)
+        clear_hist_btn.clicked.connect(self._clear_search_history)
+        hist_col.addWidget(clear_hist_btn)
+        # 空のままだと「履歴が出ない」状態がただの白い箱に見える。理由と入れ方を明記する。
+        self._history_hint = QLabel(T("履歴はまだありません。\n検索欄で Enter、または\n検索欄からフォーカスを\n外すと残ります。"))
+        self._history_hint.setStyleSheet(f"color:{PAL['fg3']};font-size:8pt;")
+        self._history_hint.setWordWrap(True)
+        hist_col.addWidget(self._history_hint)
+        hist_col.addStretch()
+        hist_row.addLayout(hist_col)
+        root.addLayout(hist_row)
+
+        # ── フッタ ───────────────────────────────────────────────────────
+        foot = QHBoxLayout()
+        reset_btn = QPushButton(T("全条件を解除"))
+        reset_btn.setToolTip(T("詳細パネルの条件をすべて初期状態に戻します（検索バーの入力は残ります）"))
+        reset_btn.clicked.connect(self._reset_adv_conditions)
+        foot.addWidget(reset_btn)
+        foot.addStretch()
+        done_btn = QPushButton(T("閉じる"))
+        done_btn.setFixedWidth(72)
+        done_btn.clicked.connect(popup.hide)
+        foot.addWidget(done_btn)
+        root.addLayout(foot)
+
+        # 保存済み設定の復元
+        self._apply_adv(self._cfg.get("adv_search", None) or ADV_DEFAULT)
+        self._search_history = list(self._cfg.get("search_history", []) or [])[:30]
+        self._history_pos = None
+        self._history_pending = ""
+        self._last_regex_err = ""
+        self._refresh_history_list()
+        self._refresh_adv_btn()
+
+    # ── 詳細検索: 状態の収集/復元 ─────────────────────────────────────────
+    def _collect_adv(self) -> dict:
+        if not getattr(self, "_adv_scope", None):
+            return json.loads(json.dumps(ADV_DEFAULT))
+        scope = {}
+        for key, cb in self._adv_scope.items():
+            try:
+                scope[key] = bool(cb.isChecked())
+            except Exception:
+                scope[key] = DEFAULT_SEARCH_SCOPE.get(key, False)
+        def _val(widget, cast):
+            try:
+                return cast(widget.value())
+            except Exception:
+                return 0
+        def _txt(widget):
+            try:
+                return widget.text().strip()
+            except Exception:
+                return ""
+        return {
+            "scope":     scope,
+            "regex":     bool(self._adv_regex.isChecked()),
+            "date_from": norm_date_bound(_txt(self._adv_date_from), False),
+            "date_to":   norm_date_bound(_txt(self._adv_date_to), True),
+            "res_min":   _val(self._adv_res_min, int),
+            "res_max":   _val(self._adv_res_max, int),
+            "size_min":  _val(self._adv_size_min, float),
+            "size_max":  _val(self._adv_size_max, float),
+            "sampler":   _txt(self._adv_sampler),
+            "steps_min": _val(self._adv_steps_min, int),
+            "steps_max": _val(self._adv_steps_max, int),
+            "cfg_min":   _val(self._adv_cfg_min, float),
+            "cfg_max":   _val(self._adv_cfg_max, float),
+            "seed":      _txt(self._seed_search_edit),
+        }
+
+    def _apply_adv(self, adv: dict):
+        adv = dict(adv or {})
+        scope = dict(DEFAULT_SEARCH_SCOPE)
+        scope.update(adv.get("scope") or {})
+        widgets = getattr(self, "_adv_scope", None)
+        if widgets:
+            for key, cb in widgets.items():
+                cb.blockSignals(True)
+                cb.setChecked(bool(scope.get(key, DEFAULT_SEARCH_SCOPE.get(key, False))))
+                cb.blockSignals(False)
+        self._adv_regex.blockSignals(True)
+        self._adv_regex.setChecked(bool(adv.get("regex", False)))
+        self._adv_regex.blockSignals(False)
+
+        def _set_text(widget, value):
+            widget.blockSignals(True)
+            widget.setText(str(value or ""))
+            widget.blockSignals(False)
+
+        def _set_val(widget, value, cast):
+            try:
+                v = cast(value)
+            except (TypeError, ValueError):
+                v = cast(0)
+            widget.blockSignals(True)
+            widget.setValue(v)
+            widget.blockSignals(False)
+
+        _set_text(self._adv_date_from, adv.get("date_from", ""))
+        _set_text(self._adv_date_to, adv.get("date_to", ""))
+        _set_text(self._adv_sampler, adv.get("sampler", ""))
+        _set_text(self._seed_search_edit, adv.get("seed", ""))
+        _set_val(self._adv_res_min, adv.get("res_min", 0), int)
+        _set_val(self._adv_res_max, adv.get("res_max", 0), int)
+        _set_val(self._adv_size_min, adv.get("size_min", 0), float)
+        _set_val(self._adv_size_max, adv.get("size_max", 0), float)
+        _set_val(self._adv_steps_min, adv.get("steps_min", 0), int)
+        _set_val(self._adv_steps_max, adv.get("steps_max", 0), int)
+        _set_val(self._adv_cfg_min, adv.get("cfg_min", 0), float)
+        _set_val(self._adv_cfg_max, adv.get("cfg_max", 0), float)
+        self._refresh_adv_btn()
+
+    def _adv_is_custom(self) -> bool:
+        """詳細パネルの条件がデフォルトから変更されているか。"""
+        if not getattr(self, "_adv_scope", None):
+            return False
+        adv = self._collect_adv()
+        if adv.get("regex") or adv_has_condition(adv):
+            return True
+        if str(adv.get("seed", "") or ""):
+            return True
+        return dict(adv.get("scope") or {}) != DEFAULT_SEARCH_SCOPE
+
+    def _refresh_adv_btn(self):
+        if getattr(self, "_adv_btn", None) is None:
+            return
+        self._adv_btn.setText(T("🔍詳細●") if self._adv_is_custom() else T("🔍詳細"))
+
+    # ── 詳細検索: ドロップダウン開閉 ─────────────────────────────────────
+    def _toggle_adv_popup(self, *_):
+        popup = getattr(self, "_adv_popup", None)
+        if popup is None:
+            return
+        if popup.isVisible():
+            popup.hide()
+            return
+        self._refresh_adv_btn()
+        popup.adjustSize()
+        base = self._adv_btn.mapToGlobal(QPoint(0, self._adv_btn.height() + 6))
+        screen = QApplication.primaryScreen().availableGeometry()
+        w, h = popup.width(), popup.height()
+        x = min(max(base.x(), screen.left()), screen.right() - w + 1)
+        y = base.y()
+        if y + h > screen.bottom():
+            y = max(screen.top(), base.y() - h - self._adv_btn.height() - 6)
+        popup.move(x, y)
+        popup.show()
+        self._adv_btn.setChecked(True)
+
+    def _on_adv_changed(self, *_):
+        # ⚠ _cfg にもその場で反映する。従来は adv_search を終了時 (_save_settings) だけ
+        # に書いていたため、途中で検索履歴保存 (save_cfg) が走ると起動時の値で上書きし、
+        # 適用した条件が次回起動時に復元されない経路があった。
+        if getattr(self, "_adv_scope", None):
+            self._cfg["adv_search"] = self._collect_adv()
+        self._filter_timer.start()
+        self._refresh_adv_btn()
+
+    def _reset_adv_conditions(self):
+        self._apply_adv(ADV_DEFAULT)
+        if getattr(self, "_adv_scope", None):
+            self._cfg["adv_search"] = self._collect_adv()
+        self._filter_timer.start()
+
+    def _validate_regex(self):
+        """詳細パネルの入力を検証し、解釈できないものを警告する（重複表示は抑止）。
+
+        ⚠ 黙って条件を無視しないための処理。日付欄は従来この検証すら無く、
+        "2026/7/15" 形式は全除外・"1/5" は全通過という静かな誤結果になっていた。
+        """
+        errs = []
+        if getattr(self, "_adv_regex", None) is not None and self._adv_regex.isChecked():
+            q = self._search_edit.text().strip()
+            if q:
+                try:
+                    re.compile(q, re.IGNORECASE)
+                except re.error as e:
+                    errs.append(f"{Te('⚠ 正規表現が不正: ')}{e}{Te('（通常の部分一致で検索します）')}")
+        for widget, label, is_end in ((getattr(self, "_adv_date_from", None), T("開始"), False),
+                                      (getattr(self, "_adv_date_to", None), T("終了"), True)):
+            if widget is None:
+                continue
+            raw = widget.text().strip()
+            if raw and not norm_date_bound(raw, is_end):
+                errs.append(f"{Te('⚠ 日付')}{label}{Te('が解釈できません: ')}{raw}"f"{Te('（YYYY-MM-DD / YYYY/MM/DD / YYYYMMDD / YYYY-MM で入力してください。この条件は無視しました）')}")
+        err = " / ".join(errs)
+        if err != getattr(self, "_last_regex_err", ""):
+            self._last_regex_err = err
+            if err:
+                self._show_fade_message(err)
+
+    # ── 検索履歴 ─────────────────────────────────────────────────────────
+    def _record_history(self, query: str):
+        q = (query or "").strip()
+        if not q:
+            return
+        hist = getattr(self, "_search_history", None)
+        if hist is None:
+            self._search_history = []
+            hist = self._search_history
+        if hist and hist[0] == q:
+            return
+        hist.insert(0, q)
+        del hist[30:]
+        self._history_pos = None
+        self._cfg["search_history"] = hist
+        self._refresh_history_list()
+        try:
+            save_cfg(self._cfg)
+        except Exception:
+            pass
+
+    def _clear_search_history(self):
+        self._search_history = []
+        self._history_pos = None
+        self._history_pending = ""
+        self._cfg["search_history"] = []
+        self._refresh_history_list()
+
+    def _refresh_history_list(self):
+        lst = getattr(self, "_history_list", None)
+        if lst is None:
+            return
+        lst.clear()
+        for q in getattr(self, "_search_history", []):
+            lst.addItem(q)
+        hint = getattr(self, "_history_hint", None)
+        if hint is not None:
+            hint.setVisible(not lst.count())
+
+    def _on_history_item_clicked(self, item: QListWidgetItem):
+        self._search_edit.setText(item.text())
+        self._history_pos = None
+        if getattr(self, "_adv_popup", None) and self._adv_popup.isVisible():
+            self._adv_popup.hide()
+
+    def _on_search_edited(self, *_):
+        """手入力で履歴の参照位置をリセットする。"""
+        self._history_pos = None
+
+    def _on_search_entered(self):
+        self._record_history(self._search_edit.text())
+
+    def _history_nav(self, step: int):
+        """検索欄の ↑/↓ で検索履歴をたどる。step: +1=過去 / -1=新しい方向。"""
+        hist = getattr(self, "_search_history", [])
+        if not hist:
+            return
+        if step > 0:
+            if self._history_pos is None:
+                self._history_pending = self._search_edit.text()
+                # 現在の入力がすでに最新履歴と同文字なら、↑ を押しても無変化に見える
+                # （「履歴が出ない」と感じられる原因）。その場合は1つ過去から始める。
+                cur = self._search_edit.text().strip()
+                self._history_pos = 0
+                if len(hist) > 1 and cur and cur == str(hist[0]).strip():
+                    self._history_pos = 1
+            else:
+                self._history_pos = min(self._history_pos + 1, len(hist) - 1)
+        else:
+            if self._history_pos is None:
+                return
+            self._history_pos -= 1
+            if self._history_pos < 0:
+                self._history_pos = None
+                self._search_edit.setText(self._history_pending)
+                self._search_edit.setCursorPosition(len(self._history_pending))
+                return
+        text = hist[self._history_pos]
+        self._search_edit.setText(text)
+        self._search_edit.setCursorPosition(len(text))
 
     def _build_ctrlbar(self):
         """廃止（v1.93）: 全項目をツールバーに統合済み。互換のため空メソッドを残す。"""
@@ -6000,18 +8173,19 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 widget.hide()
 
+    @staticmethod
+    def _toolbar_sort_key(widget):
+        return (
+            int(widget.property("_toolbar_order"))
+            if widget.property("_toolbar_order") is not None else 5000,
+            int(widget.property("_toolbar_seq"))
+            if widget.property("_toolbar_seq") is not None else 0,
+        )
+
     def _toolbar_layout_fill(self, layout: QHBoxLayout, widgets: list):
         self._toolbar_layout_clear(layout)
         has_stretchy_widget = False
-        ordered_widgets = sorted(
-            widgets,
-            key=lambda widget: (
-                int(widget.property("_toolbar_order"))
-                if widget.property("_toolbar_order") is not None else 5000,
-                int(widget.property("_toolbar_seq"))
-                if widget.property("_toolbar_seq") is not None else 0,
-            ),
-        )
+        ordered_widgets = sorted(widgets, key=self._toolbar_sort_key)
         for widget in ordered_widgets:
             stretch = int(widget.property("_toolbar_stretch") or 0)
             has_stretchy_widget = has_stretchy_widget or (stretch > 0)
@@ -6030,8 +8204,23 @@ class MainWindow(QMainWindow):
         primary = list(getattr(self, "_toolbar_primary_items", []))
         secondary = list(getattr(self, "_toolbar_secondary_items", []))
         if narrow:
-            self._toolbar_layout_fill(self._toolbar_row1, primary)
-            self._toolbar_layout_fill(self._toolbar_row2, secondary)
+            # 狭幅時: 全アイテムを表示順に並べ、2つの row へ「連続分割」する。
+            # 各 row の minimumSizeHint 合計が最小になるよう、累積最小幅が全体の
+            # 半分を超える境界で割る。これによりどちらの row も横幅に対して
+            # オーバーフローせず、QLayout が minimum 未満へ圧迫して
+            # 🔍詳細 ボタンが欠けるのを防ぐ。
+            all_items = sorted(primary + secondary, key=self._toolbar_sort_key)
+            mins = [w.minimumSizeHint().width() for w in all_items]
+            total = sum(mins)
+            acc = 0
+            split = len(all_items)
+            for i, m in enumerate(mins):
+                acc += m
+                if acc >= total / 2:
+                    split = i + 1
+                    break
+            self._toolbar_layout_fill(self._toolbar_row1, all_items[:split])
+            self._toolbar_layout_fill(self._toolbar_row2, all_items[split:])
         else:
             self._toolbar_layout_fill(self._toolbar_row1, primary + secondary)
             self._toolbar_layout_clear(self._toolbar_row2)
@@ -6039,7 +8228,7 @@ class MainWindow(QMainWindow):
             self._toolbar_row2_widget.setVisible(narrow)
         if hasattr(self, "_toolbar_row3_widget"):
             self._toolbar_row3_widget.setVisible(False)
-        self._tool_bar.setFixedHeight(96 if narrow else 42)
+        self._tool_bar.setFixedHeight(88 if narrow else 44)
 
     def _vsep(self):
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.VLine)
@@ -6067,7 +8256,7 @@ class MainWindow(QMainWindow):
         self._left_collapse_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._left_collapse_btn.setCheckable(True)
         self._left_collapse_btn.setChecked(True)   # 初期=展開
-        self._left_collapse_btn.setToolTip("フォルダパネルを開閉")
+        self._left_collapse_btn.setToolTip(T("フォルダパネルを開閉"))
         self._left_collapse_btn.setStyleSheet(
             f"QPushButton{{background:{PAL['bg2']};color:{PAL['fg3']};"
             f"border:none;border-radius:0;font-size:15px;padding:0;}}"
@@ -6107,7 +8296,7 @@ class MainWindow(QMainWindow):
         fav_hdr.setObjectName("fav_hdr")
         fav_hdr.setFixedHeight(26)
         fh = QHBoxLayout(fav_hdr); fh.setContentsMargins(6, 2, 4, 2)
-        _fav_lbl = QLabel("⭐ お気に入り")
+        _fav_lbl = QLabel(T("⭐ お気に入り"))
         _fav_lbl.setStyleSheet(
             f"color:{PAL['fg2']};font-size:8pt;font-weight:bold;"
             f"font-family:'Segoe UI Emoji','Segoe UI','Yu Gothic UI',sans-serif;")
@@ -6115,7 +8304,7 @@ class MainWindow(QMainWindow):
         fh.addStretch()
         add_fav_btn = QPushButton("\u2795")  # ➕
         add_fav_btn.setFixedSize(22, 20)
-        add_fav_btn.setToolTip("現在のフォルダをお気に入りに追加")
+        add_fav_btn.setToolTip(T("現在のフォルダをお気に入りに追加"))
         add_fav_btn.setStyleSheet(
             "background:" + PAL['bg3'] + ";color:" + PAL['fg1'] + ";"
             "border:none;border-radius:3px;"
@@ -6147,11 +8336,11 @@ class MainWindow(QMainWindow):
             f"background:{PAL['bg2']};border-bottom:1px solid {PAL['border']};")
         tree_hdr.setFixedHeight(26)
         th = QHBoxLayout(tree_hdr); th.setContentsMargins(6, 2, 6, 2)
-        th.addWidget(QLabel("📁 フォルダ"))
+        th.addWidget(QLabel(T("📁 フォルダ")))
         th.addStretch()
-        self._subfolder_cb = QCheckBox("サブ")
+        self._subfolder_cb = QCheckBox(T("サブ"))
         self._subfolder_cb.setChecked(self._cfg.get("subfolder", False))
-        self._subfolder_cb.setToolTip("サブフォルダを含む")
+        self._subfolder_cb.setToolTip(T("サブフォルダを含む"))
         self._subfolder_cb.setStyleSheet(
             f"QCheckBox{{color:{PAL['fg2']};font-size:8pt;spacing:4px;}}"
             f"QCheckBox::indicator{{width:13px;height:13px;border:1px solid {PAL['border']};"
@@ -6217,14 +8406,8 @@ class MainWindow(QMainWindow):
         lmc_layout.addWidget(left_vsplit, 1)
         outer_h.addWidget(self._left_main_content, 1)
 
-        # 縦バーボタンのクリック → _toggle_left_panel を直接呼ぶ（ツールバーボタンと同じ経路）
-        def _toggle_left_content(checked):
-            # setChecked で再帰しないよう、ツールバーボタンの状態を先に合わせてからパネル操作
-            self._toggle_left_btn.blockSignals(True)
-            self._toggle_left_btn.setChecked(checked)
-            self._toggle_left_btn.blockSignals(False)
-            self._toggle_left_panel(checked)
-        self._left_collapse_btn.clicked.connect(_toggle_left_content)
+        # 縦バーボタンのクリック → _toggle_left_panel を直接呼ぶ
+        self._left_collapse_btn.clicked.connect(self._toggle_left_panel)
 
         return outer
 
@@ -6235,25 +8418,26 @@ class MainWindow(QMainWindow):
         path = self._fs_model.filePath(idx)
         if not os.path.isdir(path): return
         menu = QMenu(self)
-        menu.addAction("📂 このフォルダを開く", lambda: self._load_folder(path))
+        menu.addAction(T("📂 このフォルダを開く"), lambda: self._load_folder(path))
+        menu.addAction(T("📋 パスをコピー"), lambda: (QApplication.clipboard().setText(path), self._set_status(f"{Te('パスをコピーしました: ')}{path}")))
         menu.addSeparator()
         if path not in self._favorites:
-            menu.addAction("⭐ お気に入りに追加", lambda: self._add_favorite_path(path))
+            menu.addAction(T("⭐ お気に入りに追加"), lambda: self._add_favorite_path(path))
         else:
-            menu.addAction("⭐ お気に入りから削除", lambda: self._remove_favorite_path(path))
+            menu.addAction(T("⭐ お気に入りから削除"), lambda: self._remove_favorite_path(path))
         menu.exec(self._tree.viewport().mapToGlobal(pos))
 
     def _add_favorite_path(self, path: str):
         if path and path not in self._favorites:
             self._favorites.append(path)
             self._refresh_fav_list()
-            self._set_status(f"お気に入りに追加: {os.path.basename(path)}")
+            self._set_status(f"{Te('お気に入りに追加: ')}{os.path.basename(path)}")
 
     def _remove_favorite_path(self, path: str):
         if path in self._favorites:
             self._favorites.remove(path)
             self._refresh_fav_list()
-            self._set_status(f"お気に入りから削除: {os.path.basename(path)}")
+            self._set_status(f"{Te('お気に入りから削除: ')}{os.path.basename(path)}")
 
     def _build_center_panel(self) -> QWidget:
         center = QWidget()
@@ -6343,7 +8527,7 @@ class MainWindow(QMainWindow):
             self._queue_preview_resize(lbl)
         self._preview_label.resizeEvent = _prev_resize
 
-        prev_hdr = self._make_panel_header("プレビュー", self._preview_label)
+        prev_hdr = self._make_panel_header(T("プレビュー"), self._preview_label)
         self._right_preview_hdr = prev_hdr   # レイアウト切り替えで hide/show するため保持
         pw_layout.addWidget(prev_hdr)
         pw_layout.addWidget(self._preview_label, 1)
@@ -6372,7 +8556,7 @@ class MainWindow(QMainWindow):
         old_ph.deleteLater()
         self._meta_panel._meta_stack.insertWidget(idx, tag_widget)
 
-        meta_hdr = self._make_panel_header("メタ情報", meta_widget)
+        meta_hdr = self._make_panel_header(T("メタ情報"), meta_widget)
         mw_layout.addWidget(meta_hdr)
         mw_layout.addWidget(self._meta_panel, 1)
 
@@ -6450,8 +8634,7 @@ class MainWindow(QMainWindow):
         if not p:
             return
         k = f"__prev__{p}"
-        with _mem_lock:
-            cached = _mem.get(k)
+        cached = _mem_get(k)
         if not cached:
             return
         cached_px = as_pixmap(cached)
@@ -6472,17 +8655,17 @@ class MainWindow(QMainWindow):
 
         # スコープ
         scope_row = QHBoxLayout()
-        self._tag_scope_cur = QRadioButton("現フォルダ"); self._tag_scope_cur.setChecked(True)
-        self._tag_scope_all = QRadioButton("全キャッシュ")
+        self._tag_scope_cur = QRadioButton(T("現フォルダ")); self._tag_scope_cur.setChecked(True)
+        self._tag_scope_all = QRadioButton(T("全キャッシュ"))
         self._tag_scope_cur.toggled.connect(self._refresh_tags)
         scope_row.addWidget(self._tag_scope_cur); scope_row.addWidget(self._tag_scope_all)
-        reload_btn = QPushButton("再集計"); reload_btn.clicked.connect(self._refresh_tags)
+        reload_btn = QPushButton(T("再集計")); reload_btn.clicked.connect(self._refresh_tags)
         reload_btn.setFixedHeight(24)
         scope_row.addStretch(); scope_row.addWidget(reload_btn)
         l.addLayout(scope_row)
 
         # 検索
-        self._tag_search_edit = QLineEdit(); self._tag_search_edit.setPlaceholderText("🔍 タグを検索...")
+        self._tag_search_edit = QLineEdit(); self._tag_search_edit.setPlaceholderText(T("🔍 タグを検索..."))
         self._tag_search_edit.textChanged.connect(self._refresh_tags)
         l.addWidget(self._tag_search_edit)
 
@@ -6492,7 +8675,7 @@ class MainWindow(QMainWindow):
         self._tag_list.itemDoubleClicked.connect(self._on_tag_dbl)
         l.addWidget(self._tag_list, 1)
 
-        hint = QLabel("ダブルクリック → 絞り込み")
+        hint = QLabel(T("ダブルクリック → 絞り込み"))
         hint.setStyleSheet(f"color:{PAL['fg3']};font-size:8pt;")
         l.addWidget(hint)
         return w
@@ -6502,7 +8685,7 @@ class MainWindow(QMainWindow):
         geo = self._cfg.get("geometry","")
         if geo:
             try: self.restoreGeometry(bytes.fromhex(geo))
-            except: pass
+            except Exception: pass
         if self._cfg.get("maximized", False):
             self.showMaximized()
 
@@ -6580,7 +8763,29 @@ class MainWindow(QMainWindow):
         self._main_splitter_locked_state = None
 
     def eventFilter(self, obj, event):
-        """メイン splitter のハンドル押下/解放を検知して反対側を固定する。"""
+        """検索欄の履歴キーハンドリング + splitter ハンドル押下/解放の検知。"""
+        # ── 検索履歴 (v2.10): 検索欄の ↑/↓ で履歴をたどる ────────────────
+        if obj is getattr(self, "_search_edit", None):
+            if event.type() == QEvent.Type.KeyPress:
+                if event.key() == Qt.Key.Key_Up:
+                    self._history_nav(1)
+                    return True
+                if event.key() == Qt.Key.Key_Down:
+                    self._history_nav(-1)
+                    return True
+            # Enter だけでなく「検索欄を離れた時」も履歴に残す。
+            # 従来は returnPressed 限定で、入力してそのままサムネイルを見に行く運用
+            # （大半）では履歴が1件も積まず「履歴が出ない」状態になっていた。
+            if event.type() == QEvent.Type.FocusOut:
+                self._on_search_entered()
+            return super().eventFilter(obj, event)
+
+        # ── 詳細検索パネルが外部操作で閉じた時はボタン状態を戻す ─────────
+        if obj is getattr(self, "_adv_popup", None) and event.type() == QEvent.Type.Hide:
+            if getattr(self, "_adv_btn", None) is not None:
+                self._adv_btn.setChecked(False)
+            return super().eventFilter(obj, event)
+
         side = None
         if getattr(self, "_main_splitter_handles", None):
             for k, handle in self._main_splitter_handles.items():
@@ -6604,9 +8809,9 @@ class MainWindow(QMainWindow):
         return super().eventFilter(obj, event)
 
     def _on_splitter_settled(self):
-        """スプリッタ操作が落ち着いた後にパネル幅だけを設定ファイルに保存する。
-        ウィンドウサイズやレイアウト等は closeEvent でまとめて保存するため
-        ここでは pane_left / pane_right のみ更新する。"""
+        """スプリッタ操作が落ち着いた後に設定ファイルへ保存する。
+        [v2.05.1 OPT] D5: pane_left/right だけでなく layout 系スプリッタ位置も
+        このタイミングでまとめて保存。デバウンス (500ms) でカクつき防止。"""
         if self.isMaximized():
             return
         try:
@@ -6616,6 +8821,8 @@ class MainWindow(QMainWindow):
                 self._cfg["pane_left"] = lw
             if rw and rw > 10:
                 self._cfg["pane_right"] = rw
+            # layout 系キーは _save_BC/_save_D で _cfg に反映済み。
+            # ここで save_cfg 一発で永続化。
             save_cfg(self._cfg)
         except Exception:
             pass
@@ -6671,6 +8878,9 @@ class MainWindow(QMainWindow):
             "favorites":   self._favorites,
             "enabled_exts":self._enabled_exts,
             "loop_mode":   self._loop_mode,
+            "tag_and":     self._tag_and_cb.isChecked(),
+            "adv_search":  self._collect_adv(),
+            "search_history": list(getattr(self, "_search_history", []))[:30],
         })
         # 縦スプリッター位置を保存
         try:
@@ -6717,44 +8927,35 @@ class MainWindow(QMainWindow):
                 if sizes[2] > 10: rw = sizes[2]
             if lw: self._cfg["pane_left"]  = lw
             if rw: self._cfg["pane_right"] = rw
-        except: pass
+        except Exception: pass
         save_cfg(self._cfg)
         e.accept()
 
     # ══ フォルダ操作 ══════════════════════════════════════════════════════
     def _open_folder(self):
-        path = QFileDialog.getExistingDirectory(self, "フォルダを選択")
+        path = QFileDialog.getExistingDirectory(self, T("フォルダを選択"))
         if path:
             path = _normalize_path(path)
             self._load_folder(path)
 
     def _retire_worker(self, worker):
-        """
-        ワーカーを「引退」させる。
-        - シグナルを全切断してゾンビシグナルを防ぐ
-        - cancel() で処理を中断させる
-        - _old_workers に追加してスレッド終了まで GC を防ぐ
-        - スレッド終了後に _old_workers から自動除去
-        """
-        if worker is None:
+        if worker is None or worker in self._old_workers:
             return
-        # シグナルを全切断
-        try: worker.blockSignals(True)
-        except: pass
-        # キャンセルフラグを立てる
-        try: worker.cancel()
-        except: pass
-        # _old_workers で生存管理（GC防止）
+        worker.blockSignals(True)
+        worker.cancel()
         self._old_workers.append(worker)
-        # スレッド終了後に自動除去
-        try:
-            worker.finished.connect(lambda w=worker: self._old_workers.remove(w)
-                                    if w in self._old_workers else None)
-        except:
-            try:
-                worker.done.connect(lambda w=worker: self._old_workers.remove(w)
-                                    if w in self._old_workers else None)
-            except: pass
+        self._cleanup_retired_workers()
+        if self._old_workers:
+            self._worker_cleanup_timer.start()
+
+    def _cleanup_retired_workers(self):
+        # finished は結果通知にも使われ、引退時には遮断されるため終了状態を確認する。
+        for worker in self._old_workers[:]:
+            if not worker.isRunning():
+                self._old_workers.remove(worker)
+                worker.deleteLater()
+        if not self._old_workers:
+            self._worker_cleanup_timer.stop()
 
     def _on_address_bar_enter(self):
         """アドレスバーで Enter → パスを検証してフォルダ移動（v1.93）"""
@@ -6771,7 +8972,7 @@ class MainWindow(QMainWindow):
                 f"QLineEdit{{background:{PAL['bg2']};color:{PAL['fg1']};"
                 f"border:1px solid {PAL['border']};border-radius:3px;padding:0 6px;}}"
                 f"QLineEdit:focus{{border-color:{PAL['accent']};}}"))
-            self._set_status(f"フォルダが見つかりません: {path}")
+            self._set_status(f"{Te('フォルダが見つかりません: ')}{path}")
 
     def _load_folder(self, path: str):
         path = _normalize_path(path)
@@ -6786,7 +8987,7 @@ class MainWindow(QMainWindow):
             self._tree.setCurrentIndex(idx)
             self._tree.expand(idx)
             self._tree.scrollTo(idx)
-        except: pass
+        except Exception: pass
 
         # 旧ワーカーを全て引退させる（wait()不使用・GCセーフ）
         self._retire_worker(self._scan_worker);    self._scan_worker    = None
@@ -6797,7 +8998,7 @@ class MainWindow(QMainWindow):
         # スキャン開始
         import time as _time_mod
         self._folder_load_t0 = _time_mod.perf_counter()
-        self._set_status("スキャン中...")
+        self._set_status(T("スキャン中..."))
         self._notice_lbl.show()
 
         self._scan_worker = ScanWorker(path, self._subfolder_action.isChecked(),
@@ -6826,13 +9027,13 @@ class MainWindow(QMainWindow):
         self._dup_cached_groups = []
         self._dup_cached_summary = {}
         n = len(files)
-        self._set_status(f"スキャン完了: {n}枚", 0)
+        self._set_status(f"{Te('スキャン完了: ')}{n}{Te('枚')}", 0)
         if hasattr(self, "_folder_load_t0"):
             import time as _tm
             _el = (_tm.perf_counter() - self._folder_load_t0) * 1000
-            self._log(f"フォルダ読込完了: {n}枚  {self._cur_folder}", _ConsolePanel.LEVEL_OK, elapsed_ms=_el)
+            self._log(f"{Te('フォルダ読込完了: ')}{n}{Te('枚  ')}{self._cur_folder}", _ConsolePanel.LEVEL_OK, elapsed_ms=_el)
         if n > 5000:
-            self._notice_lbl.setText(f"💡 {n}枚あります。初回サムネ生成に時間がかかります")
+            self._notice_lbl.setText(f"💡 {n}{Te('枚あります。初回サムネ生成に時間がかかります')}")
             self._notice_lbl.show()
         else:
             self._notice_lbl.hide()
@@ -6843,7 +9044,7 @@ class MainWindow(QMainWindow):
         pending_quality = self._pending_quality_scan_force
         self._pending_quality_scan_force = None
         if pending_quality is not None:
-            self._set_status("スキャン完了。AI判定を開始します...", 1)
+            self._set_status(T("スキャン完了。AI判定を開始します..."), 1)
             self._start_quality_ai_scan(force=pending_quality)
             return
 
@@ -6868,41 +9069,45 @@ class MainWindow(QMainWindow):
         self._preload_worker.done.connect(self._on_preload_done)
         self._preload_worker.start()
 
+    def _has_active_filter(self) -> bool:
+        """フィルタ再実行が必要な条件が1つでも有効か（PreloadWorker の再フィルタ判定用）。"""
+        tq = self._search_edit.text().strip()
+        mq = self._model_cb.currentText().strip()
+        sq = self._seed_search_edit.text().strip()
+        rf = self._rating_cb.currentText()
+        bq = self._base_model_cb.currentData() if hasattr(self, "_base_model_cb") else ""
+        if (tq or mq or sq or bq or rf != "all"
+                or getattr(self, "_quality_filter_state", "all") != "all"
+                or self._sort_cb.currentData() == "imgsize"):
+            return True
+        return adv_has_condition(self._collect_adv())
+
     @Slot(int, int)
     def _on_preload_progress(self, cur: int, total: int):
         if self._quality_ai_worker is not None:
             return
         pct = int(cur / total * 100)
-        self._set_status(f"メタ読込 {cur}/{total}", pct)
-        # 💡 500件進むごとにフィルターを再適用して UI に結果を反映させる。
-        # FilterWorker が未キャッシュファイルをスキップする設計にしたため、
-        # PreloadWorker の進捗に合わせてここで定期的に再フィルタリングすることで
-        # 検索結果がシームレスに増えていくようになる。
-        if cur % 500 == 0:
-            tq = self._search_edit.text().strip()
-            mq = self._model_cb.currentText().strip()
-            sq = self._seed_search_edit.text().strip()
-            rf = self._rating_cb.currentText()
-            if tq or mq or sq or rf != "all":
-                self._apply_filter()
+        self._set_status(f"{Te('メタ読込 ')}{cur}/{total}", pct)
+        if (cur % 500 == 0 and self._has_active_filter()
+                and (self._filter_worker is None or not self._filter_worker.isRunning())):
+            self._apply_filter()
 
     @Slot()
     def _on_preload_done(self):
         if self._quality_ai_worker is not None:
             return
-        self._set_status("メタ読込完了", 100)
-        self._log("メタデータ先読み完了", _ConsolePanel.LEVEL_OK)
+        self._set_status(T("メタ読込完了"), 100)
+        self._log(T("メタデータ先読み完了"), _ConsolePanel.LEVEL_OK)
         self._update_model_list()
+        # サムネイルの系統バッジを再描画（META キャッシュが揃ったので初めて正確になる）
+        if hasattr(self, "_grid") and hasattr(self._grid, "_refresh_cell_badges"):
+            self._grid._refresh_cell_badges()
         # メタデータが全件揃った状態でフィルターを再適用する。
         # サブフォルダ読み込み等でファイル数が多い場合、_apply_filter() は
         # PreloadWorker 完了前（META キャッシュが不完全な段階）に走ることがある。
         # その場合タグ・モデルが空になりフィルターが機能しないため、
         # メタ読込完了後に必ず再フィルタリングする。
-        tq = self._search_edit.text().strip()
-        mq = self._model_cb.currentText().strip()
-        sq = self._seed_search_edit.text().strip()
-        rf = self._rating_cb.currentText()
-        if tq or mq or sq or rf != "all":
+        if self._has_active_filter():
             self._apply_filter()
 
     def _get_sibling_folders(self):
@@ -6914,20 +9119,20 @@ class MainWindow(QMainWindow):
                 [os.path.join(parent, d) for d in os.listdir(parent)
                  if os.path.isdir(os.path.join(parent, d)) and not d.startswith(".")],
                 key=lambda x: os.path.basename(x).lower())
-        except: return [], -1
+        except Exception: return [], -1
         cur_n = os.path.normcase(self._cur_folder)
         idx = next((i for i,p in enumerate(siblings) if os.path.normcase(p)==cur_n), -1)
         return siblings, idx
 
     def _go_prev_folder(self):
         siblings, idx = self._get_sibling_folders()
-        if not siblings or idx <= 0: self._set_status("前のフォルダはありません"); return
+        if not siblings or idx <= 0: self._set_status(T("前のフォルダはありません")); return
         self._load_folder(siblings[idx-1])
 
     def _go_next_folder(self):
         siblings, idx = self._get_sibling_folders()
         if not siblings or idx < 0 or idx >= len(siblings)-1:
-            self._set_status("次のフォルダはありません"); return
+            self._set_status(T("次のフォルダはありません")); return
         self._load_folder(siblings[idx+1])
 
     @Slot(QModelIndex)
@@ -6951,16 +9156,19 @@ class MainWindow(QMainWindow):
         mq     = self._model_cb.currentText().strip()
         sq     = self._seed_search_edit.text().strip()
         rf     = self._rating_cb.currentText()
+        bq     = self._base_model_cb.currentData() if hasattr(self, "_base_model_cb") else ""
         qf     = getattr(self, "_quality_filter_state", "all")
         key    = self._sort_cb.currentData() or "name"
         rev    = self._sort_dir_btn.isChecked()
-        meta_snap = dict(META._d)
+        adv    = self._collect_adv()
+        self._validate_regex()
+        meta_snap = META.snapshot()
 
         self._retire_worker(self._filter_worker)
         self._filter_worker = FilterWorker(
             list(self._all_paths), tq, tag_and, mq, sq, rf, qf,
             dict(self._ratings), dict(self._quality_cache), key, rev, meta_snap,
-            stats_dict=dict(self._scan_stats))
+            stats_dict=dict(self._scan_stats), bq=bq or "", adv=adv)
         worker_ref = self._filter_worker
         self._filter_worker.finished.connect(
             lambda result, ref=worker_ref: self._on_filter_done_guarded(result, ref))
@@ -6971,13 +9179,13 @@ class MainWindow(QMainWindow):
             return
         self._filtered = filtered
         total = len(self._all_paths)
-        self._count_lbl.setText(f"{len(filtered)}/{total}枚" if total else f"{len(filtered)}枚")
+        self._count_lbl.setText(f"{len(filtered)}/{total}{Te('枚')}" if total else f"{len(filtered)}{Te('枚')}")
         self._update_quality_footer()
         self._grid.set_images(filtered)
 
     def _reload_quality_cache(self):
         self._quality_cache = load_quality_cache()
-        self._set_status("AI評価キャッシュを再読込しました")
+        self._set_status(T("AI評価キャッシュを再読込しました"))
         self._apply_filter()
         try:
             # キャッシュ再読込だけでは一覧位置を戻さない
@@ -6997,7 +9205,7 @@ class MainWindow(QMainWindow):
         return "★" * rating
 
     def _quality_rule_summary(self) -> str:
-        return "高 = hq かつ score 0.5以上 / 低 = lq かつ score 0.5以上 / それ以外 = 中"
+        return T("高 = hq かつ score 0.5以上 / 低 = lq かつ score 0.5以上 / それ以外 = 中")
 
     def _quality_count_summary(self) -> str:
         counts = {"high": 0, "mid": 0, "low": 0, "unknown": 0}
@@ -7005,7 +9213,7 @@ class MainWindow(QMainWindow):
             label = self._quality_label_for_path(p)
             counts[label if label in counts else "unknown"] += 1
         return (
-            f"高:{counts['high']}  中:{counts['mid']}  低:{counts['low']}  未:{counts['unknown']}"
+            f"{Te('高:')}{counts['high']}{Te('  中:')}{counts['mid']}{Te('  低:')}{counts['low']}{Te('  未:')}{counts['unknown']}"
         )
 
     def _update_quality_footer(self):
@@ -7013,7 +9221,7 @@ class MainWindow(QMainWindow):
         if lbl is None:
             return
         if self._all_paths:
-            lbl.setText(f"AI判定 {self._quality_count_summary()}")
+            lbl.setText(f"{Te('AI判定 ')}{self._quality_count_summary()}")
             lbl.show()
         else:
             lbl.clear()
@@ -7023,35 +9231,35 @@ class MainWindow(QMainWindow):
         self._quality_filter_state = label
         self._apply_filter()
         label_map = {
-            "all": "すべて",
-            "high": "高",
-            "mid": "中",
-            "low": "低",
-            "unknown": "未判定",
+            "all": T("すべて"),
+            "high": T("高"),
+            "mid": T("中"),
+            "low": T("低"),
+            "unknown": T("未判定"),
         }
-        self._set_status(f"AI評価表示: {label_map.get(label, label)}  |  {self._quality_rule_summary()}")
+        self._set_status(f"{Te('AI評価表示: ')}{label_map.get(label, label)}  |  {self._quality_rule_summary()}")
 
     def _quality_badge_spec(self, path: str) -> tuple[str, str, str] | None:
         label = self._quality_label_for_path(path)
         if label == "high":
-            return ("高", "#1f9d62", "#e9fff3")
+            return (T("高"), "#1f9d62", "#e9fff3")
         if label == "mid":
-            return ("中", "#b28712", "#fff6da")
+            return (T("中"), "#b28712", "#fff6da")
         if label == "low":
-            return ("低", "#9f2f42", "#ffe8ed")
+            return (T("低"), "#9f2f42", "#ffe8ed")
         if label == "unknown":
-            return ("未", "#4a4a4a", "#f2f2f2")
+            return (T("未"), "#4a4a4a", "#f2f2f2")
         return None
 
     def _select_by_quality(self, label: str):
         paths = {p for p in (self._filtered or self._all_paths) if self._quality_label_for_path(p) == label}
         self._grid.set_multi_sel(paths)
-        self._set_status(f"AI評価 {label} を {len(paths)} 件選択")
+        self._set_status(f"{Te('AI評価 ')}{label}{Te(' を ')}{len(paths)}{Te(' 件選択')}")
 
     def _select_by_quality_multi(self, labels: set):
         paths = {p for p in (self._filtered or self._all_paths) if self._quality_label_for_path(p) in labels}
         self._grid.set_multi_sel(paths)
-        self._set_status(f"AI評価 {','.join(sorted(labels))} を {len(paths)} 件選択")
+        self._set_status(f"{Te('AI評価 ')}{','.join(sorted(labels))}{Te(' を ')}{len(paths)}{Te(' 件選択')}")
 
     def _select_current_quality(self):
         label = getattr(self, "_quality_filter_state", "all")
@@ -7063,14 +9271,14 @@ class MainWindow(QMainWindow):
     def _delete_selected_from_quality(self):
         sel = self._grid.get_selection()
         if not sel:
-            self._set_status("削除する画像を選択してください")
+            self._set_status(T("削除する画像を選択してください"))
             return
         self._delete_multi(sel)
 
     def _delete_by_quality(self, labels: set[str]):
         paths = [p for p in (self._filtered or self._all_paths) if self._quality_label_for_path(p) in labels]
         if not paths:
-            self._set_status("削除対象の品質画像がありません")
+            self._set_status(T("削除対象の品質画像がありません"))
             return
         self._grid.set_multi_sel(set(paths))
         self._delete_multi(paths)
@@ -7078,8 +9286,8 @@ class MainWindow(QMainWindow):
     def _show_quality_help(self):
         QMessageBox.information(
             self,
-            "AI評価の内容",
-            "現在のAI判定は『破綻検出』ではありません。\n"
+            T("AI評価の内容"),
+            T("現在のAI判定は『破綻検出』ではありません。\n"
             "aesthetic-shadow 系モデルを使った『見た目の好ましさ』寄りの評価です。\n\n"
             "判定の意味:\n"
             "高 : hq かつ score 0.5以上\n"
@@ -7097,7 +9305,7 @@ class MainWindow(QMainWindow):
             "1. ツール > AI画像評価 > AI評価を開始\n"
             "2. 下の進捗バーで完了まで待つ\n"
             "3. ツール > AI画像評価 > 低だけ表示 で確認\n"
-            "4. 必要なら 低を全選択 / 低を削除 を使う"
+            "4. 必要なら 低を全選択 / 低を削除 を使う")
         )
 
     def _refresh_quality_perf_actions(self):
@@ -7113,13 +9321,13 @@ class MainWindow(QMainWindow):
         self._cfg["quality_ai_profile"] = profile
         self._refresh_quality_perf_actions()
         profile_map = {
-            "auto": "自動",
-            "eco": "省メモリ",
-            "standard": "標準",
-            "fast": "高速",
-            "max": "最大",
+            "auto": T("自動"),
+            "eco": T("省メモリ"),
+            "standard": T("標準"),
+            "fast": T("高速"),
+            "max": T("最大"),
         }
-        self._set_status(f"AI速度: {profile_map.get(profile, profile)}")
+        self._set_status(f"{Te('AI速度: ')}{profile_map.get(profile, profile)}")
 
     def _set_scroll_ruler_visible(self, visible: bool):
         if hasattr(self, "_grid"):
@@ -7131,14 +9339,14 @@ class MainWindow(QMainWindow):
         if not paths:
             if self._scan_worker is not None:
                 self._pending_quality_scan_force = force
-                self._set_status("スキャン完了待ち... 完了後にAI判定を自動開始します", 0)
+                self._set_status(T("スキャン完了待ち... 完了後にAI判定を自動開始します"), 0)
                 return
-            self._set_status("AI品質判定する画像がありません")
+            self._set_status(T("AI品質判定する画像がありません"))
             return
         if self._quality_ai_worker is not None:
             try:
                 if self._quality_ai_worker.isRunning():
-                    self._set_status("AI品質判定はすでに実行中です", 0)
+                    self._set_status(T("AI品質判定はすでに実行中です"), 0)
                     return
             except Exception:
                 self._quality_ai_worker = None
@@ -7147,24 +9355,26 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(
                 self,
-                "AI画像評価",
-                f"image_quality_sorter.py を読み込めませんでした:\n{exc}"
+                T("AI画像評価"),
+                f"{Te('image_quality_sorter.py を読み込めませんでした:␜n')}{exc}"
             )
             return
         if not getattr(quality_mod, "HAS_TRANSFORMERS", False):
             QMessageBox.critical(
                 self,
-                "AI画像評価",
-                "transformers が見つかりません。\n\npython -m pip install transformers"
+                T("AI画像評価"),
+                T("transformers が見つかりません。\n\npython -m pip install transformers")
             )
             return
         # AI判定を最優先し、メタ先読みのI/O競合を止める
         self._retire_worker(self._preload_worker)
         self._preload_worker = None
         device_name = "cuda" if getattr(quality_mod, "torch").cuda.is_available() else "cpu"
+        # [v2.05 FIX] T6: _quality_cache のコピーを渡す (クロススレッド安全)
+        quality_cache_snapshot = dict(self._quality_cache)
         self._quality_ai_worker = quality_mod.QualityWorker(
             paths,
-            self._quality_cache,
+            quality_cache_snapshot,
             device_name,
             force,
             getattr(self, "_quality_perf_profile", "auto"),
@@ -7175,7 +9385,7 @@ class MainWindow(QMainWindow):
         self._quality_ai_worker.finished_scan.connect(self._on_quality_ai_finished)
         self._quality_ai_worker.failed.connect(self._on_quality_ai_failed)
         self._set_status(
-            f"AI画像評価を開始: {len(paths)}件 ({'再判定' if force else 'キャッシュ利用'})",
+            f"{Te('AI画像評価を開始: ')}{len(paths)}{Te('件 (')}{T('再判定') if force else T('キャッシュ利用')})",
             0,
         )
         self._quality_ai_worker.start()
@@ -7183,7 +9393,7 @@ class MainWindow(QMainWindow):
     def _on_quality_ai_progress(self, current: int, total: int, message: str):
         total = max(total, 1)
         pct = min(100, int((current / total) * 100))
-        if current <= 0 and "読み込み" in message:
+        if current <= 0 and T("読み込み") in message:
             pct = 1
         self._set_status(f"{message} {current}/{total}", pct)
 
@@ -7193,7 +9403,7 @@ class MainWindow(QMainWindow):
     def _on_quality_ai_finished(self, cancelled: bool):
         self._quality_ai_worker = None
         self._reload_quality_cache()
-        status = "AI画像評価をキャンセルしました" if cancelled else "AI画像評価が完了しました"
+        status = T("AI画像評価をキャンセルしました") if cancelled else T("AI画像評価が完了しました")
         self._set_status(status, 100)
         if self._preload_worker is None and self._all_paths:
             self._preload_worker = PreloadWorker(self._all_paths, stats=self._scan_stats)
@@ -7203,18 +9413,18 @@ class MainWindow(QMainWindow):
         if not cancelled:
             QMessageBox.information(
                 self,
-                "AI画像評価",
-                "AI画像評価が完了しました。\n\nツール > AI画像評価 > 低だけ表示 から確認できます。"
+                T("AI画像評価"),
+                T("AI画像評価が完了しました。\n\nツール > AI画像評価 > 低だけ表示 から確認できます。")
             )
 
     def _on_quality_ai_failed(self, message: str):
         self._quality_ai_worker = None
-        short = (message or "").splitlines()[0][:120] if message else "不明なエラー"
-        self._set_status(f"AI画像評価エラー: {short}")
-        QMessageBox.critical(self, "AI画像評価", message)
+        short = (message or "").splitlines()[0][:120] if message else T("不明なエラー")
+        self._set_status(f"{Te('AI画像評価エラー: ')}{short}")
+        QMessageBox.critical(self, T("AI画像評価"), message)
 
     def _update_model_list(self):
-        meta_snap = dict(META._d)
+        meta_snap = META.snapshot()
         self._retire_worker(self._model_worker)
         self._model_worker = ModelListWorker(self._all_paths, meta_snap)
         worker_ref = self._model_worker
@@ -7226,20 +9436,45 @@ class MainWindow(QMainWindow):
         if worker_ref is not self._model_worker:
             return
         cur = self._model_cb.currentText()
+        base = self._base_model_cb.currentData() or ""
         self._model_cb.blockSignals(True)
         self._model_cb.clear()
-        self._model_cb.addItem("")
         for m in models: self._model_cb.addItem(m)
         idx = self._model_cb.findText(cur)
-        if idx >= 0: self._model_cb.setCurrentIndex(idx)
+        self._model_cb.setCurrentIndex(idx if idx >= 0 else -1)   # -1 = 未選択（placeholder 表示）
         self._model_cb.blockSignals(False)
+        self._refresh_base_model_filter(models)
+        if (cur != self._model_cb.currentText()
+                or base != (self._base_model_cb.currentData() or "")):
+            self._filter_timer.start()
+
+    def _refresh_base_model_filter(self, models: list):
+        """実在する系統だけを拾って系統ドロップダウンを再構築する。
+        未使用の系統（例: Flux）は表示しない。"""
+        present = set()
+        for name in models:
+            key = classify_base_model(name)
+            if key:
+                present.add(key)
+        current = self._base_model_cb.currentData() or ""
+        self._base_model_cb.blockSignals(True)
+        self._base_model_cb.clear()
+        self._base_model_cb.addItem(T("全て"), "")
+        for key, label in BASE_MODEL_GROUPS:
+            if key == "":
+                continue
+            if key in present:
+                self._base_model_cb.addItem(label, key)
+        idx = self._base_model_cb.findData(current)
+        self._base_model_cb.setCurrentIndex(idx if idx >= 0 else 0)
+        self._base_model_cb.blockSignals(False)
 
     def _toggle_sort_dir(self):
         self._update_sort_dir_btn(); self._apply_filter()
 
     def _update_sort_dir_btn(self):
         rev = self._sort_dir_btn.isChecked()
-        self._sort_dir_btn.setText("↓降順" if rev else "↑昇順")
+        self._sort_dir_btn.setText(T("↓降順") if rev else T("↑昇順"))
         self._sort_dir_btn.setStyleSheet(
             f"QPushButton{{background:{PAL['bg2']};color:{PAL['accent'] if rev else PAL['fg1']};"
             f"border:1px solid {PAL['border']};border-radius:3px;padding:0 8px;min-height:0;}}"
@@ -7268,8 +9503,7 @@ class MainWindow(QMainWindow):
             return
 
         # メタ取得: キャッシュにあれば即更新、なければ非同期で後から更新（UIブロックなし）
-        with META._lock:
-            cached = META._d.get(path)
+        cached = META.peek(path)
 
         if cached is not None:
             meta = dict(cached)
@@ -7280,14 +9514,23 @@ class MainWindow(QMainWindow):
             self._meta_panel.show_meta(path, meta, self._ratings)
         else:
             self._meta_panel.show_loading(path)
-            def _load_and_update(p=path):
-                try:
-                    meta = META.get(p)
-                    self._meta_loaded.emit(p, meta)
-                except Exception:
-                    pass
-            import threading as _threading
-            _threading.Thread(target=_load_and_update, daemon=True).start()
+            # [v2.05 FIX] T5: QThreadPool でスレッド無制限生成を防止
+            from PySide6.QtCore import QRunnable
+            class _MetaLoadTask(QRunnable):
+                def __init__(self, path, callback):
+                    super().__init__()
+                    self._path = path
+                    self._callback = callback
+                def run(self):
+                    try:
+                        meta = META.get(self._path)
+                        self._callback(self._path, meta)
+                    except Exception as e:
+                        try: print(f"[MetaLoad] error: {e}")
+                        except Exception: pass
+            task = _MetaLoadTask(path, lambda p, m: self._meta_loaded.emit(p, m))
+            task.setAutoDelete(True)
+            QThreadPool.globalInstance().start(task, 10)  # v2.06 P1: サムネ群より高優先
 
         self._update_preview(path)
         if hasattr(self, "_layout_preview") and self._layout_preview:
@@ -7339,14 +9582,14 @@ class MainWindow(QMainWindow):
         META.invalidate(path)
         self._grid.set_images_keep_scroll(self._filtered or self._all_paths)
         total = len(self._all_paths)
-        self._count_lbl.setText(f"{len(self._filtered)}/{total}枚" if total else f"{len(self._filtered)}枚")
+        self._count_lbl.setText(f"{len(self._filtered)}/{total}{Te('枚')}" if total else f"{len(self._filtered)}{Te('枚')}")
         self._update_quality_footer()
 
     # ══ グリッドイベント ══════════════════════════════════════════════════
     @Slot(set)
     def _on_sel_change(self, sel_set: set):
         n = len(sel_set)
-        self._set_status(f"  {n}枚選択中" if n else "")
+        self._set_status(f"  {n}{Te('枚選択中')}" if n else "")
 
     @Slot(int)
     def _on_ctrl_wheel(self, delta: int):
@@ -7385,66 +9628,68 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
 
         # 開く
-        menu.addAction("🖼 全画面で開く",          lambda: self._open_full(path))
-        explorer_label = f"📂 エクスプローラーで選択({len(sel)}件)" if is_multi else "📂 エクスプローラーで選択"
+        menu.addAction(T("🖼 全画面で開く"),          lambda: self._open_full(path))
+        explorer_label = f"{Te('📂 エクスプローラーで選択(')}{len(sel)}{Te('件)')}" if is_multi else T("📂 エクスプローラーで選択")
         menu.addAction(explorer_label, lambda: self._open_in_explorer(path))
+        path_cnt = f"{len(sel)}{Te('件')}" if is_multi else ""
+        menu.addAction(f"{Te('📋 パスをコピー')}{path_cnt}", lambda: self._copy_path_to_clipboard(sel))
         menu.addSeparator()
 
         # 編集系
-        cnt_str = f"{len(sel)}件" if is_multi else ""
-        menu.addAction(f"📋 コピー{cnt_str}  Ctrl+C",  self._copy_to_clipboard)
-        menu.addAction(f"✂ 切り取り{cnt_str}  Ctrl+X", self._cut_to_clipboard)
-        menu.addAction("📥 貼り付け  Ctrl+V",           self._paste_from_clipboard)
+        cnt_str = f"{len(sel)}{Te('件')}" if is_multi else ""
+        menu.addAction(f"{Te('📋 コピー')}{cnt_str}  Ctrl+C",  self._copy_to_clipboard)
+        menu.addAction(f"{Te('✂ 切り取り')}{cnt_str}  Ctrl+X", self._cut_to_clipboard)
+        menu.addAction(T("📥 貼り付け  Ctrl+V"),           self._paste_from_clipboard)
         menu.addSeparator()
 
         # 名前変更（単一選択時のみ）
         if not is_multi:
-            menu.addAction("✏ 名前の変更  F2", self._rename_selected)
+            menu.addAction(T("✏ 名前の変更  F2"), self._rename_selected)
             menu.addSeparator()
 
         # 削除
-        del_label = f"🗑 削除{cnt_str}  Delete"
+        del_label = f"{Te('🗑 削除')}{cnt_str}  Delete"
         if is_multi:
             menu.addAction(del_label, lambda: self._delete_multi(sel))
-            menu.addAction(f"⚠ 完全削除{cnt_str}  Shift+Delete",
+            menu.addAction(f"{Te('⚠ 完全削除')}{cnt_str}  Shift+Delete",
                            lambda: self._delete_multi(sel, permanent=True))
         else:
             menu.addAction(del_label, lambda: self._delete_path(path))
-            menu.addAction("⚠ 完全削除  Shift+Delete",
+            menu.addAction(T("⚠ 完全削除  Shift+Delete"),
                            lambda: self._delete_path(path, permanent=True))
         menu.addSeparator()
 
         # レーティング
-        rate_menu = menu.addMenu("★ レーティング")
-        for r, lbl in [(0,"なし"),(1,"★1"),(2,"★★2"),(3,"★★★3"),(4,"★★★★4"),(5,"★★★★★5")]:
+        rate_menu = menu.addMenu(T("★ レーティング"))
+        for r, lbl in [(0,T("なし")),(1,"★1"),(2,"★★2"),(3,"★★★3"),(4,"★★★★4"),(5,"★★★★★5")]:
             rate_menu.addAction(lbl, lambda _r=r: self._rate(path, _r))
         menu.addSeparator()
 
         # ─ ロゴオーバーレイ ─
         menu.addSeparator()
-        overlay_menu = menu.addMenu("🎨 ロゴオーバーレイ")
+        overlay_menu = menu.addMenu(T("🎨 ロゴオーバーレイ"))
         overlay_menu.addAction(
-            "🖼 ロゴを設定...",
+            T("🖼 ロゴを設定..."),
             lambda: self._overlay_set_logo(sel))
         if not is_multi:
             overlay_menu.addAction(
-                "📐 位置・サイズ調整...",
+                T("📐 位置・サイズ調整..."),
                 lambda: self._overlay_adjust_safe(path))
         overlay_menu.addAction(
-            "📁 保存フォルダを開く",
+            T("📁 保存フォルダを開く"),
             lambda: self._open_logo_folder())
         overlay_menu.addAction(
-            "🗑 ロゴ設定を削除",
+            T("🗑 ロゴ設定を削除"),
             lambda: self._overlay_remove(sel))
         overlay_menu.addSeparator()
         overlay_menu.addAction(
-            "💾 合成画像を出力...",
+            T("💾 合成画像を出力..."),
             lambda: self._overlay_export(sel))
 
         # プロパティ
         menu.addSeparator()
         if not is_multi:
-            menu.addAction("ℹ プロパティ  Alt+Enter", self._show_properties)
+            menu.addAction(T("ℹ プロパティ  Alt+Enter"), self._show_properties)
 
         menu.exec(pos)
 
@@ -7500,7 +9745,7 @@ class MainWindow(QMainWindow):
             logo_dir.mkdir(parents=True, exist_ok=True)
             os.startfile(str(logo_dir))
         except Exception:
-            QMessageBox.warning(self, "フォルダを開けません", f"保存先: {get_logo_dir()}")
+            QMessageBox.warning(self, T("フォルダを開けません"), f"{Te('保存先: ')}{get_logo_dir()}")
 
     # ══ 操作 ══════════════════════════════════════════════════════════════
     def _select_all(self):
@@ -7515,31 +9760,31 @@ class MainWindow(QMainWindow):
 
     def _delete_path(self, path: str, permanent: bool = False):
         """単一ファイル削除。複数選択時は _delete_multi を使うこと。"""
-        dest = "完全削除" if permanent else ("ゴミ箱" if HAS_SEND2TRASH else ".deleted/")
+        dest = T("完全削除") if permanent else (T("ゴミ箱") if HAS_SEND2TRASH else ".deleted/")
         preview = load_thumb(path, 42) if os.path.isfile(path) else None
         if not _DeleteConfirmDialog.ask(
             self,
-            "削除確認",
-            f"{os.path.basename(path)}\nこのファイルを {dest} に移動しますか？",
+            T("削除確認"),
+            f"{os.path.basename(path)}{Te('␜nこのファイルを ')}{dest}{Te(' に移動しますか？')}",
             permanent=permanent,
             preview=preview): return
         ok, err = delete_file(path, permanent=permanent)
         if not ok:
-            _ErrorDialog.show_error("削除エラー", err, self)
+            _ErrorDialog.show_error(T("削除エラー"), err, self)
             return
-        self._log(f"削除: {os.path.basename(path)}", _ConsolePanel.LEVEL_WARN)
+        self._log(f"{Te('削除: ')}{os.path.basename(path)}", _ConsolePanel.LEVEL_WARN)
         self._remove_path(path)
 
     def _delete_multi(self, paths: list, permanent: bool = False):
         """複数ファイル一括削除"""
         if not paths: return
-        dest = "完全削除" if permanent else ("ゴミ箱" if HAS_SEND2TRASH else ".deleted/")
+        dest = T("完全削除") if permanent else (T("ゴミ箱") if HAS_SEND2TRASH else ".deleted/")
         names = "\n".join(os.path.basename(p) for p in paths[:8])
-        if len(paths) > 8: names += f"\n...他{len(paths)-8}件"
+        if len(paths) > 8: names += f"{Te('␜n...他')}{len(paths)-8}{Te('件')}"
         if not _DeleteConfirmDialog.ask(
             self,
-            f"削除確認 ({len(paths)}件)",
-            f"{len(paths)}件のファイルを {dest} に移動しますか？\n\n{names}",
+            f"{Te('削除確認 (')}{len(paths)}{Te('件)')}",
+            f"{len(paths)}{Te('件のファイルを ')}{dest}{Te(' に移動しますか？␜n␜n')}{names}",
             permanent=permanent): return
         errors = []
         deleted = []
@@ -7551,12 +9796,12 @@ class MainWindow(QMainWindow):
             self._remove_path_silent(p)
         self._grid.set_images_keep_scroll(self._filtered or self._all_paths)
         total = len(self._all_paths)
-        self._count_lbl.setText(f"{len(self._filtered)}/{total}枚" if total else f"{len(self._filtered)}枚")
+        self._count_lbl.setText(f"{len(self._filtered)}/{total}{Te('枚')}" if total else f"{len(self._filtered)}{Te('枚')}")
         self._update_quality_footer()
         if deleted:
-            self._log(f"一括削除: {len(deleted)}件", _ConsolePanel.LEVEL_WARN)
+            self._log(f"{Te('一括削除: ')}{len(deleted)}{Te('件')}", _ConsolePanel.LEVEL_WARN)
         if errors:
-            _ErrorDialog.show_error("削除エラー", "\n".join(errors), self)
+            _ErrorDialog.show_error(T("削除エラー"), "\n".join(errors), self)
 
     def _remove_path_silent(self, path: str):
         """リストからパスを削除するだけ（グリッド更新なし・バッチ向け）"""
@@ -7586,10 +9831,10 @@ class MainWindow(QMainWindow):
         else:
             # リストにない場合はコンボを編集可能にして直接セット後、元に戻す
             self._model_cb.blockSignals(True)
-            # 一致するものが無ければ先頭の空欄に戻す（フィルター解除）
-            self._model_cb.setCurrentIndex(0)
+            # 一致するものが無ければ未選択に戻す（フィルター解除）
+            self._model_cb.setCurrentIndex(-1)
             self._model_cb.blockSignals(False)
-        self._show_fade_message(f"🔍 モデルで絞り込み: {model}")
+        self._show_fade_message(f"{Te('🔍 モデルで絞り込み: ')}{model}")
 
     # ══ お気に入り ════════════════════════════════════════════════════════
     def _refresh_fav_list(self):
@@ -7608,20 +9853,20 @@ class MainWindow(QMainWindow):
         if self._cur_folder and self._cur_folder not in self._favorites:
             self._favorites.append(self._cur_folder)
             self._refresh_fav_list()
-            self._set_status(f"ブックマークに追加: {os.path.basename(self._cur_folder)}")
+            self._set_status(f"{Te('ブックマークに追加: ')}{os.path.basename(self._cur_folder)}")
 
     def _show_bookmark_dialog(self):
         """Ctrl+B: ブックマーク（お気に入り）管理ダイアログ"""
         dlg = QDialog(self)
-        dlg.setWindowTitle("⭐ ブックマーク")
+        dlg.setWindowTitle(T("⭐ ブックマーク"))
         dlg.resize(480, 360)
         vl = QVBoxLayout(dlg)
 
         # ヘッダー
         hdr = QHBoxLayout()
-        hdr.addWidget(QLabel("📁 ブックマーク一覧"))
+        hdr.addWidget(QLabel(T("📁 ブックマーク一覧")))
         hdr.addStretch()
-        add_btn = QPushButton("➕ 現在のフォルダを追加")
+        add_btn = QPushButton(T("➕ 現在のフォルダを追加"))
         add_btn.setObjectName("accent")
         hdr.addWidget(add_btn)
         vl.addLayout(hdr)
@@ -7645,18 +9890,18 @@ class MainWindow(QMainWindow):
 
         # ボタン行
         btn_row = QHBoxLayout()
-        open_btn = QPushButton("📂 開く")
+        open_btn = QPushButton(T("📂 開く"))
         open_btn.setObjectName("accent")
-        del_btn  = QPushButton("🗑 削除")
+        del_btn  = QPushButton(T("🗑 削除"))
         del_btn.setObjectName("danger")
-        close_btn2 = QPushButton("閉じる")
+        close_btn2 = QPushButton(T("閉じる"))
         btn_row.addWidget(open_btn)
         btn_row.addWidget(del_btn)
         btn_row.addStretch()
         btn_row.addWidget(close_btn2)
         vl.addLayout(btn_row)
 
-        hint = QLabel("ダブルクリックまたは「開く」でフォルダを読み込み  |  右クリックで削除")
+        hint = QLabel(T("ダブルクリックまたは「開く」でフォルダを読み込み  |  右クリックで削除"))
         hint.setStyleSheet(f"color:{PAL['fg3']};font-size:8pt;")
         vl.addWidget(hint)
 
@@ -7668,7 +9913,7 @@ class MainWindow(QMainWindow):
                 self._load_folder(p)
                 dlg.accept()
             else:
-                QMessageBox.warning(dlg, "エラー", f"フォルダが見つかりません:\n{p}")
+                QMessageBox.warning(dlg, T("エラー"), f"{Te('フォルダが見つかりません:␜n')}{p}")
 
         def _del_selected():
             item = lst.currentItem()
@@ -7697,8 +9942,8 @@ class MainWindow(QMainWindow):
             item = lst.itemAt(pos)
             if not item: return
             m = QMenu(dlg)
-            m.addAction("📂 開く", _open_selected)
-            m.addAction("🗑 削除", _del_selected)
+            m.addAction(T("📂 開く"), _open_selected)
+            m.addAction(T("🗑 削除"), _del_selected)
             m.exec(lst.mapToGlobal(pos))
         lst.customContextMenuRequested.connect(_rc)
 
@@ -7721,8 +9966,8 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
             else:
-                QMessageBox.warning(self, "お気に入り",
-                    f"フォルダが見つかりません:\n{p}\n\nお気に入りから削除しますか？",
+                QMessageBox.warning(self, T("お気に入り"),
+                    f"{Te('フォルダが見つかりません:␜n')}{p}{Te('␜n␜nお気に入りから削除しますか？')}",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                 ) == QMessageBox.StandardButton.Yes and (
                     self._favorites.remove(p), self._refresh_fav_list())
@@ -7737,9 +9982,9 @@ class MainWindow(QMainWindow):
         if not item: return
         p = item.data(Qt.ItemDataRole.UserRole)
         menu = QMenu(self)
-        menu.addAction("📂 開く", lambda: self._load_folder(p) if os.path.isdir(p) else None)
+        menu.addAction(T("📂 開く"), lambda: self._load_folder(p) if os.path.isdir(p) else None)
         menu.addSeparator()
-        menu.addAction("🗑 お気に入りから削除", lambda: (
+        menu.addAction(T("🗑 お気に入りから削除"), lambda: (
             self._favorites.remove(p) if p in self._favorites else None,
             self._refresh_fav_list()
         ))
@@ -7748,9 +9993,9 @@ class MainWindow(QMainWindow):
     # ══ タグパネル ════════════════════════════════════════════════════════
     def _refresh_tags(self):
         scope_all = self._tag_scope_all.isChecked()
-        paths = list(META._d.keys()) if scope_all else list(self._all_paths)
+        paths = META.keys() if scope_all else list(self._all_paths)
         q = self._tag_search_edit.text()
-        meta_snap = dict(META._d)
+        meta_snap = META.snapshot()
         self._retire_worker(self._tag_worker)
         self._tag_worker = TagCountWorker(paths, meta_snap, q)
         worker_ref = self._tag_worker
@@ -7781,7 +10026,7 @@ class MainWindow(QMainWindow):
     def _open_duplicate_detector(self):
         paths = list(self._all_paths)
         if not paths:
-            self._set_status("重複検出する画像がありません")
+            self._set_status(T("重複検出する画像がありません"))
             return
         if (
             self._dup_cached_groups
@@ -7789,7 +10034,7 @@ class MainWindow(QMainWindow):
             and len(paths) == self._dup_cached_count
         ):
             self._set_status(
-                f"前回の重複検出結果を表示: {len(self._dup_cached_groups)}グループ",
+                f"{Te('前回の重複検出結果を表示: ')}{len(self._dup_cached_groups)}{Te('グループ')}",
                 100,
             )
             self._show_duplicate_results(
@@ -7798,7 +10043,7 @@ class MainWindow(QMainWindow):
             )
             return
         self._retire_worker(self._dup_worker)
-        meta_snap = dict(META._d)
+        meta_snap = META.snapshot()
         self._dup_worker = DuplicateDetectWorker(
             paths,
             stats=dict(self._scan_stats),
@@ -7810,7 +10055,7 @@ class MainWindow(QMainWindow):
         self._dup_worker.progress.connect(lambda msg: self._set_status(msg))
         self._dup_worker.finished.connect(
             lambda groups, summary, ref=worker_ref: self._on_duplicate_detect_done(groups, summary, ref))
-        self._set_status("重複画像を検出中...", 0)
+        self._set_status(T("重複画像を検出中..."), 0)
         self._dup_worker.start()
 
     def _on_duplicate_detect_done(self, groups: list, summary: dict, worker_ref):
@@ -7818,11 +10063,11 @@ class MainWindow(QMainWindow):
             return
         self._dup_worker = None
         if not groups:
-            self._set_status("重複画像は見つかりませんでした", 100)
-            QMessageBox.information(self, "重複画像検出", "重複画像は見つかりませんでした。")
+            self._set_status(T("重複画像は見つかりませんでした"), 100)
+            QMessageBox.information(self, T("重複画像検出"), T("重複画像は見つかりませんでした。"))
             return
         self._set_status(
-            f"重複画像: {len(groups)}グループ / 削除候補{summary.get('duplicate_files', 0)}件",
+            f"{Te('重複画像: ')}{len(groups)}{Te('グループ / 削除候補')}{summary.get('duplicate_files', 0)}{Te('件')}",
             100)
         self._dup_cached_folder = self._cur_folder or ""
         self._dup_cached_count = len(self._all_paths)
@@ -7833,26 +10078,26 @@ class MainWindow(QMainWindow):
     def _show_duplicate_group(self, paths: list, focus_path: str | None = None):
         valid = [p for p in paths if os.path.isfile(p)]
         if not valid:
-            QMessageBox.warning(self, "重複画像", "このグループのファイルは見つかりません。")
+            QMessageBox.warning(self, T("重複画像"), T("このグループのファイルは見つかりません。"))
             return
         self._filtered = valid
         self._grid.set_images(valid)
         total = len(self._all_paths)
-        self._count_lbl.setText(f"{len(valid)}/{total}枚 (重複グループ)" if total else f"{len(valid)}枚 (重複グループ)")
-        self._set_status(f"重複グループを表示: {len(valid)}件", 100)
+        self._count_lbl.setText(f"{len(valid)}/{total}{Te('枚 (重複グループ)')}" if total else f"{len(valid)}{Te('枚 (重複グループ)')}")
+        self._set_status(f"{Te('重複グループを表示: ')}{len(valid)}{Te('件')}", 100)
         target = focus_path if focus_path in valid else valid[0]
         self._sel_image(target)
 
     def _show_duplicate_results(self, groups: list, summary: dict):
         dlg = QDialog(self)
-        dlg.setWindowTitle("🔍 重複画像検出結果")
+        dlg.setWindowTitle(T("🔍 重複画像検出結果"))
         dlg.resize(1380, 860)
         vl = QVBoxLayout(dlg)
         summary_lbl = QLabel("")
         summary_lbl.setStyleSheet(f"color:{PAL['fg1']};font-weight:bold;")
         vl.addWidget(summary_lbl)
 
-        hint = QLabel("各グループの先頭は既定で保持、2件目以降が削除チェック済みです。カードをクリックすると対象グループを選択、ダブルクリックまたはグループ表示ボタンで比較グリッドへ移動します。")
+        hint = QLabel(T("各グループの先頭は既定で保持、2件目以降が削除チェック済みです。カードをクリックすると対象グループを選択、ダブルクリックまたはグループ表示ボタンで比較グリッドへ移動します。"))
         hint.setStyleSheet(f"color:{PAL['fg3']};font-size:8pt;")
         vl.addWidget(hint)
 
@@ -7906,14 +10151,14 @@ class MainWindow(QMainWindow):
             frame_vl.setSpacing(10)
 
             head = QHBoxLayout()
-            head_lbl = QLabel(f"Grp {gid}  |  {group['mode']}  |  {len(group['paths'])} 枚")
+            head_lbl = QLabel(f"Grp {gid}  |  {group['mode']}  |  {len(group['paths'])}{Te(' 枚')}")
             head_lbl.setStyleSheet(f"color:{PAL['fg1']};font-weight:bold;")
-            show_group_btn = QPushButton("👀 このグループを表示")
+            show_group_btn = QPushButton(T("👀 このグループを表示"))
             show_group_btn.setObjectName("accent")
             show_group_btn.clicked.connect(lambda _=False, gid=gid: _show_group(gid))
-            check_group_btn = QPushButton("☑ このグループ")
+            check_group_btn = QPushButton(T("☑ このグループ"))
             check_group_btn.clicked.connect(lambda _=False, gid=gid: _set_group_checks(gid, True, keep_first=True))
-            clear_group_btn = QPushButton("☐ このグループ解除")
+            clear_group_btn = QPushButton(T("☐ このグループ解除"))
             clear_group_btn.clicked.connect(lambda _=False, gid=gid: _set_group_checks(gid, False))
             head.addWidget(head_lbl)
             head.addStretch()
@@ -7937,13 +10182,13 @@ class MainWindow(QMainWindow):
                 card_vl.setSpacing(5)
 
                 row_top = QHBoxLayout()
-                chk = QCheckBox("削除")
+                chk = QCheckBox(T("削除"))
                 chk.setChecked(idx != 0)
                 chk.toggled.connect(lambda _checked=False: _refresh_summary())
                 checkboxes[path] = chk
                 row_top.addWidget(chk)
                 row_top.addStretch()
-                keep_lbl = QLabel("保持" if idx == 0 else "")
+                keep_lbl = QLabel(T("保持") if idx == 0 else "")
                 keep_lbl.setStyleSheet(f"color:{PAL['fg3']};font-size:8pt;")
                 row_top.addWidget(keep_lbl)
                 card_vl.addLayout(row_top)
@@ -7953,7 +10198,12 @@ class MainWindow(QMainWindow):
                 preview_btn.setIconSize(QSize(148, 148))
                 preview_btn.setFixedSize(164, 164)
                 preview_btn.setStyleSheet(f"QToolButton{{padding:6px;border:1px solid {PAL['bg3']};border-radius:8px;background:{PAL['bg0']};color:{PAL['fg1']};}}")
-                px = load_preview_pixmap(path, 148, 148)
+                # グリッドと同じサムネイルサイズを指定する。そうすると閲覧で作られた
+                # mem/disk キャッシュをそのまま使える（148px 新指定だと全カード分を
+                # UIスレッドでフルデコードすることになる）。
+                px = load_thumb(path, int(self._cfg.get("thumb_size", 170)))
+                if px is None or px.isNull():
+                    px = load_preview_pixmap(path, 148, 148)
                 if px and not px.isNull():
                     preview_btn.setIcon(QIcon(px))
                 fsize = self._scan_stats.get(path, (0, 0, 0))[2]
@@ -8017,9 +10267,7 @@ class MainWindow(QMainWindow):
             selected_gid = current_group["id"]
             selected_cnt = len(group_map.get(selected_gid, [])) if selected_gid in group_map else 0
             summary_lbl.setText(
-                f"検査: {summary.get('scanned', 0)}件  |  完全一致: {summary.get('exact_groups', 0)}グループ"
-                f"  |  類似: {summary.get('similar_groups', 0)}グループ  |  削除チェック: {len(_checked_paths())}件"
-                f"  |  選択中グループ: {selected_gid if selected_gid is not None else '-'} ({selected_cnt}枚)"
+                f"{Te('検査: ')}{summary.get('scanned', 0)}{Te('件  |  完全一致: ')}{summary.get('exact_groups', 0)}{Te('グループ')}"f"{Te('  |  類似: ')}{summary.get('similar_groups', 0)}{Te('グループ  |  削除チェック: ')}{len(_checked_paths())}{Te('件')}"f"{Te('  |  選択中グループ: ')}{selected_gid if selected_gid is not None else '-'} ({selected_cnt}{Te('枚)')}"
             )
 
         def _show_current_group():
@@ -8047,7 +10295,7 @@ class MainWindow(QMainWindow):
         def _delete_checked():
             paths = _checked_paths()
             if not paths:
-                QMessageBox.information(dlg, "重複画像", "削除対象にチェックがありません。")
+                QMessageBox.information(dlg, T("重複画像"), T("削除対象にチェックがありません。"))
                 return
             self._delete_multi(paths, permanent=False)
             remain_groups = []
@@ -8058,8 +10306,8 @@ class MainWindow(QMainWindow):
                     new_group["paths"] = remain
                     remain_groups.append(new_group)
             remain_summary = dict(summary)
-            remain_summary["exact_groups"] = sum(1 for g in remain_groups if g.get("mode") == "完全一致")
-            remain_summary["similar_groups"] = sum(1 for g in remain_groups if g.get("mode") == "類似")
+            remain_summary["exact_groups"] = sum(1 for g in remain_groups if g.get("mode") == T("完全一致"))
+            remain_summary["similar_groups"] = sum(1 for g in remain_groups if g.get("mode") == T("類似"))
             remain_summary["duplicate_files"] = sum(max(0, len(g.get("paths", [])) - 1) for g in remain_groups)
             self._dup_cached_folder = self._cur_folder or ""
             self._dup_cached_count = len(self._all_paths)
@@ -8071,17 +10319,17 @@ class MainWindow(QMainWindow):
             else:
                 self._dup_cached_groups = []
                 self._dup_cached_summary = {}
-                QTimer.singleShot(0, lambda: QMessageBox.information(self, "重複画像", "重複グループはすべて処理されました。"))
+                QTimer.singleShot(0, lambda: QMessageBox.information(self, T("重複画像"), T("重複グループはすべて処理されました。")))
 
         btn_row = QHBoxLayout()
-        show_btn = QPushButton("👀 選択グループをグリッド表示")
+        show_btn = QPushButton(T("👀 選択グループをグリッド表示"))
         show_btn.setObjectName("accent")
-        keep_btn = QPushButton("☑ 先頭以外を選択")
-        clear_group_btn = QPushButton("☐ 選択グループ解除")
-        clear_btn = QPushButton("☐ すべて解除")
-        del_btn = QPushButton("🗑 チェック項目を削除")
+        keep_btn = QPushButton(T("☑ 先頭以外を選択"))
+        clear_group_btn = QPushButton(T("☐ 選択グループ解除"))
+        clear_btn = QPushButton(T("☐ すべて解除"))
+        del_btn = QPushButton(T("🗑 チェック項目を削除"))
         del_btn.setObjectName("danger")
-        close_btn = QPushButton("閉じる")
+        close_btn = QPushButton(T("閉じる"))
         btn_row.addWidget(show_btn)
         btn_row.addWidget(keep_btn)
         btn_row.addWidget(clear_group_btn)
@@ -8104,9 +10352,9 @@ class MainWindow(QMainWindow):
     # ══ 類似検索 ══════════════════════════════════════════════════════════
     def _find_similar(self, threshold: int = 8):
         if not self._sel_path:
-            self._set_status("画像を選択してから実行してください"); return
+            self._set_status(T("画像を選択してから実行してください")); return
         base = self._sel_path
-        self._set_status("類似画像を検索中...", 0)
+        self._set_status(T("類似画像を検索中..."), 0)
         self._retire_worker(self._similar_worker)
         self._similar_worker = SimilarFindWorker(base, list(self._all_paths), threshold, self)
         worker_ref = self._similar_worker
@@ -8129,16 +10377,16 @@ class MainWindow(QMainWindow):
         self._grid.set_images(results)
         n = len(results)-1
         total = len(self._all_paths)
-        self._count_lbl.setText(f"{len(results)}/{total}枚 (類似{n}件)" if total else f"{len(results)}枚 (類似{n}件)")
-        self._set_status(f"類似画像: {n}件  — Esc で解除", 100)
+        self._count_lbl.setText(f"{len(results)}/{total}{Te('枚 (類似')}{n}{Te('件)')}" if total else f"{len(results)}{Te('枚 (類似')}{n}{Te('件)')}")
+        self._set_status(f"{Te('類似画像: ')}{n}{Te('件  — Esc で解除')}", 100)
 
     # ══ LoRA分析 ══════════════════════════════════════════════════════════
     def _open_lora_stats(self):
         lf = self._cfg.get("lora_folder","")
         if not lf or not os.path.isdir(lf):
             dlg = _DeleteConfirmDialog(
-                "LoRAフォルダ未設定",
-                "LoRAフォルダが設定されていません。\n今すぐ設定しますか？",
+                T("LoRAフォルダ未設定"),
+                T("LoRAフォルダが設定されていません。\n今すぐ設定しますか？"),
                 permanent=False, parent=self)
             dlg.findChild(QLabel).setText("⚙")
             dlg.exec()
@@ -8153,18 +10401,120 @@ class MainWindow(QMainWindow):
             win.exec()
         except Exception:
             import traceback
-            QMessageBox.critical(self, "LoRA分析エラー", traceback.format_exc())
+            QMessageBox.critical(self, T("LoRA分析エラー"), traceback.format_exc())
 
     # ══ 設定 ══════════════════════════════════════════════════════════════
     def _clear_meta_cache(self):
         """メタキャッシュ（メモリ＋ディスク）を初期化する"""
         if QMessageBox.question(
-            self, "確認",
-            "メタデータキャッシュを削除しますか？\n次回起動時の読み込みが遅くなります。",
+            self, T("確認"),
+            T("メタデータキャッシュを削除しますか？\n次回起動時の読み込みが遅くなります。"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         ) == QMessageBox.StandardButton.Yes:
             META.clear()
-            self._set_status("メタキャッシュをクリアしました")
+            self._set_status(T("メタキャッシュをクリアしました"))
+
+    def _show_thumb_cache_info(self):
+        """サムネ cache の実際の置き場と容量を出す（C: 逼迫の所在をユーザーが確認できるように）。"""
+        raw_n = pkl_n = 0
+        raw_sz = pkl_sz = 0
+        try:
+            with os.scandir(CACHE_DIR) as it:
+                for e in it:
+                    if e.is_dir(follow_symlinks=False):
+                        continue
+                    try:
+                        sz = e.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
+                    if e.name.endswith(".raw"):
+                        raw_n += 1; raw_sz += sz
+                    elif e.name.endswith(".pkl"):
+                        pkl_n += 1; pkl_sz += sz
+        except OSError as ex:
+            QMessageBox.warning(self, T("エラー"), f"{Te('キャッシュフォルダを読めません: ')}{ex}")
+            return
+        default_dir = APP_DIR / "thumbs"
+        where = T("既定（LOCALAPPDATA）") if CACHE_DIR == default_dir \
+            else T("settings.json の `thumb_cache_dir` 指定")
+        pkl_note = (f"{Te('␜n旧形式 .pkl: ')}{pkl_n:,}{Te('件 / ')}{pkl_sz/1048576:,.0f}{Te('MB（現行コードは読みません）')}"
+                    if pkl_n else "")
+        QMessageBox.information(
+            self, T("サムネキャッシュ"),
+            f"{Te('保存先: ')}{CACHE_DIR}\n"f"（{where}）\n\n"f"{Te('計 ')}{raw_n + pkl_n:,}{Te('件 / ')}{(raw_sz + pkl_sz)/1073741824:.2f}GB\n"f"{Te('現行形式 .raw: ')}{raw_n:,}{Te('件 / ')}{raw_sz/1073741824:.2f}GB{pkl_note}\n\n"f"{Te('保存先を変える場合は settings.json に絶対パスの `thumb_cache_dir` を指定します。')}"f"{Te('移行時は先に丸ごとコピーし、全件サイズ一致を確認してから元を削除してください')}"f"{Te('（コピー先に `.fmt_version` が無いと起動時の自動消去で全キャッシュが消えます）。')}")
+
+    def _prune_thumb_cache(self):
+        """サムネイル disk キャッシュを上限サイズまで古い順に整理する。
+
+        キャッシュキーが `{path}:{size}` なので、サムネサイズを変えるたびに同じ画像の
+        別ファイルが増えて無制限に育つ（実測 134,916ファイル / 14.7GB）。自動では消さない。
+        現行コードが読むのは `*.raw` だけだが、旧形式の `*.pkl`（実測 15,676件 / 1.28GB）が
+        残骸として同じフォルダに積み上がるため、対象に含めてまとめて減らせるようにする。
+        """
+        entries = []
+        total = 0
+        pkl_n = pkl_sz = 0
+        try:
+            with os.scandir(CACHE_DIR) as it:
+                for e in it:
+                    if e.name.endswith(".raw"):
+                        pass
+                    elif e.name.endswith(".pkl"):
+                        pkl_n += 1
+                    else:
+                        continue
+                    try:
+                        st = e.stat()
+                    except OSError:
+                        continue
+                    entries.append((st.st_mtime, st.st_size, e.path))
+                    total += st.st_size
+                    if e.name.endswith(".pkl"):
+                        pkl_sz += st.st_size
+        except OSError as ex:
+            QMessageBox.warning(self, T("エラー"), f"{Te('キャッシュフォルダを読めません: ')}{ex}")
+            return
+        if not entries:
+            QMessageBox.information(self, T("整理"), T("サムネイルキャッシュはまだありません。"))
+            return
+        pkl_note = (f"{Te('␜nうち旧形式 .pkl が ')}{pkl_n:,}{Te('件 / ')}{pkl_sz/1048576:,.0f}MB"f"{Te('（現行コードは読まない残骸）')}" if pkl_n else "")
+        limit_mb, ok = QInputDialog.getInt(
+            self, T("サムネキャッシュ整理"),
+            f"{Te('現在 ')}{len(entries):,}{Te('ファイル / ')}{total/1048576:,.0f}MB。{pkl_note}\n"f"{Te('保持する上限を MB で指定してください（古いものから削除されます）。')}",
+            2048, 64, 65536, 1)
+        if not ok:
+            return
+        target = limit_mb * 1048576
+        if total <= target:
+            QMessageBox.information(self, T("整理"), f"{Te('上限 ')}{limit_mb:,}{Te('MB 以下なので削除不要です。')}")
+            return
+        reply = QMessageBox.question(
+            self, T("確認"),
+            f"{Te('約 ')}{(total - target)/1048576:,.0f}{Te('MB を削除します。続行しますか？␜n')}"f"{Te('対応するサムネイルは次回表示時に再生成されます（画像本体は消えません）。␜n')}"f"{Te('旧形式 .pkl は再生成されず、そのまま不要になります。')}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        entries.sort()
+        app = QApplication.instance()
+        freed = removed = 0
+        for _mtime, size, p in entries:
+            if total <= target:
+                break
+            try:
+                os.remove(p)
+            except OSError:
+                continue
+            total -= size
+            freed += size
+            removed += 1
+            if removed % 2000 == 0:
+                self._set_status(f"{Te('キャッシュ整理中… ')}{removed:,}{Te('件削除')}")
+                if app is not None:
+                    app.processEvents()
+        QMessageBox.information(
+            self, T("完了"),
+            f"{removed:,}{Te('件 / ')}{freed/1048576:,.0f}{Te('MB を削除しました。␜n')}"f"{Te('残り ')}{total/1048576:,.0f}MB")
+        self._log(f"{Te('サムネキャッシュ整理: 削除')}{removed:,}{Te('件 / 残り')}{total/1048576:,.0f}MB")
 
     def _prebuild_all_thumbs(self):
         """現在のリストにある全画像のサムネイルをバックグラウンドで一括生成（v2.02）"""
@@ -8172,15 +10522,14 @@ class MainWindow(QMainWindow):
             return
 
         reply = QMessageBox.question(
-            self, "全サムネイル生成",
-            f"現在の表示対象 {len(self._all_paths)} 件のサムネイルをバックグラウンドで生成しますか？\n"
-            "※数万枚ある場合はディスクI/Oにより一時的に動作が重くなる場合があります。",
+            self, T("全サムネイル生成"),
+            f"{Te('現在の表示対象 ')}{len(self._all_paths)}{Te(' 件のサムネイルをバックグラウンドで生成しますか？␜n')}"f"{Te('※数万枚ある場合はディスクI/Oにより一時的に動作が重くなる場合があります。')}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        self._set_status(f"サムネイル一括生成を開始しました...")
+        self._set_status(f"{Te('サムネイル一括生成を開始しました...')}")
 
         queued = 0
         thumb_size = self._size_slider.value()
@@ -8195,7 +10544,52 @@ class MainWindow(QMainWindow):
             QThreadPool.globalInstance().start(loader)
             queued += 1
 
-        self._set_status(f"サムネイル一括生成: {queued}件をキューに投入しました")
+        self._set_status(f"{Te('サムネイル一括生成: ')}{queued}{Te('件をキューに投入しました')}")
+
+    # ══ ロード統計 (v2.06 計測) ═════════════════════════════════════════════
+    def _show_load_stats(self):
+        """画像ロード性能の統計を表示する。改善効果の before/after 確認用。"""
+        with _stats_lock:
+            rows = [(k, v[0], v[1], v[2]) for k, v in _LOAD_STATS.items()]
+        if not rows:
+            QMessageBox.information(self, T("ロード統計"), T("まだ計測データがありません。\n画像を表示・スクロールしてから開いてください。"))
+            return
+        rows.sort()
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"{Te('📊 ロード統計 (')}{APP_VERSION})")
+        dlg.resize(460, 260)
+        l = QVBoxLayout(dlg)
+        tbl = QTableWidget(len(rows), 4, dlg)
+        tbl.setHorizontalHeaderLabels([T("カテゴリ"), T("件数"), T("平均 ms"), T("最大 ms")])
+        tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        tbl.verticalHeader().setVisible(False)
+        for r, (cat, n, tot, mx) in enumerate(rows):
+            vals = [cat, str(n), f"{tot / n:.1f}" if n else "-", f"{mx:.1f}"]
+            for c, v in enumerate(vals):
+                tbl.setItem(r, c, QTableWidgetItem(v))
+        tbl.horizontalHeader().setStretchLastSection(True)
+        tbl.resizeColumnsToContents()
+        l.addWidget(tbl, 1)
+        hint = QLabel(
+            T("thumb_mem=メモリヒット / thumb_disk=ディスクサムネ読込 / thumb_decode=デコード+縮小\n"
+            "preview_mem/preview_load=右パネル等のプレビュー / fullview=全画面デコード"))
+        hint.setStyleSheet(f"color:{PAL['fg3']};font-size:8pt;")
+        l.addWidget(hint)
+        btns = QHBoxLayout()
+        btns.addStretch()
+        reset_btn = QPushButton(T("リセット"))
+        close_btn = QPushButton(T("閉じる"))
+        btns.addWidget(reset_btn)
+        btns.addWidget(close_btn)
+        l.addLayout(btns)
+        reset_btn.clicked.connect(lambda: (self._reset_load_stats(), dlg.accept()))
+        close_btn.clicked.connect(dlg.accept)
+        dlg.exec()
+
+    def _reset_load_stats(self):
+        with _stats_lock:
+            _LOAD_STATS.clear()
+        self._log(T("ロード統計をリセットしました"), _ConsolePanel.LEVEL_INFO)
 
     # ══ ロゴオーバーレイ操作 (v2.03) ══════════════════════════════════════
     def _overlay_corner_choices(self) -> list[tuple[str, str]]:
@@ -8214,8 +10608,8 @@ class MainWindow(QMainWindow):
         current_label = next((label for label, value in choices if value == initial), labels[0])
         label, ok = QInputDialog.getItem(
             self,
-            "ロゴ配置",
-            "ロゴを置く位置を選択してください",
+            T("ロゴ配置"),
+            T("ロゴを置く位置を選択してください"),
             labels,
             labels.index(current_label),
             False,
@@ -8252,7 +10646,7 @@ class MainWindow(QMainWindow):
         if not paths:
             return
         logo, _ = QFileDialog.getOpenFileName(
-            self, "ロゴPNG を選択", "", "画像ファイル (*.png *.PNG *.jpg *.jpeg *.webp)")
+            self, T("ロゴPNG を選択"), "", T("画像ファイル (*.png *.PNG *.jpg *.jpeg *.webp)"))
         if not logo:
             return
         self._overlay_adjust(paths[0], initial_logo=logo, apply_paths=paths)
@@ -8262,7 +10656,7 @@ class MainWindow(QMainWindow):
             self._overlay_adjust(path)
         except Exception:
             import traceback
-            _ErrorDialog.show_error("ロゴ調整エラー", traceback.format_exc(), self)
+            _ErrorDialog.show_error(T("ロゴ調整エラー"), traceback.format_exc(), self)
 
     def _overlay_adjust(self, path: str, initial_logo: str = "", apply_paths: list | None = None):
         """ロゴの位置と見た目サイズをプレビューしながら調整する。"""
@@ -8274,7 +10668,7 @@ class MainWindow(QMainWindow):
             info["logo_path"] = initial_logo
         apply_paths = list(dict.fromkeys(apply_paths or [path]))
         dlg = QDialog(self)
-        dlg.setWindowTitle("📐 ロゴ位置・サイズ調整")
+        dlg.setWindowTitle(T("📐 ロゴ位置・サイズ調整"))
         dlg.resize(920, 620)
 
         root = QVBoxLayout(dlg)
@@ -8284,8 +10678,8 @@ class MainWindow(QMainWindow):
         logo_row = QHBoxLayout()
         logo_row.setSpacing(8)
         logo_edit = QLineEdit(info.get("logo_path", ""))
-        browse_btn = QPushButton("参照...")
-        logo_row.addWidget(QLabel("ロゴ画像:"))
+        browse_btn = QPushButton(T("参照..."))
+        logo_row.addWidget(QLabel(T("ロゴ画像:")))
         logo_row.addWidget(logo_edit, 1)
         logo_row.addWidget(browse_btn)
         root.addLayout(logo_row)
@@ -8299,7 +10693,7 @@ class MainWindow(QMainWindow):
         preview_layout = QVBoxLayout(preview_frame)
         preview_layout.setContentsMargins(10, 10, 10, 10)
         preview_layout.setSpacing(8)
-        preview_title = QLabel("プレビュー")
+        preview_title = QLabel(T("プレビュー"))
         preview_title.setStyleSheet(f"color:{PAL['fg1']};font-weight:bold;")
         preview_lbl = QLabel()
         preview_lbl.setMinimumSize(520, 420)
@@ -8314,15 +10708,15 @@ class MainWindow(QMainWindow):
         ctrl.setSpacing(10)
         body.addLayout(ctrl)
 
-        ctrl.addWidget(QLabel("配置"))
+        ctrl.addWidget(QLabel(T("配置")))
         grid = QGridLayout()
         grid.setSpacing(6)
         corner_buttons = {}
         corner_specs = [
-            ("↖ 左上", "top_left", 0, 0),
-            ("↗ 右上", "top_right", 0, 1),
-            ("↙ 左下", "bottom_left", 1, 0),
-            ("↘ 右下", "bottom_right", 1, 1),
+            (T("↖ 左上"), "top_left", 0, 0),
+            (T("↗ 右上"), "top_right", 0, 1),
+            (T("↙ 左下"), "bottom_left", 1, 0),
+            (T("↘ 右下"), "bottom_right", 1, 1),
         ]
         for text, value, row, col in corner_specs:
             btn = QPushButton(text)
@@ -8332,11 +10726,11 @@ class MainWindow(QMainWindow):
             grid.addWidget(btn, row, col)
         ctrl.addLayout(grid)
 
-        manual_btn = QPushButton("手動配置")
+        manual_btn = QPushButton(T("手動配置"))
         manual_btn.setCheckable(True)
         ctrl.addWidget(manual_btn)
 
-        size_title = QLabel("サイズ")
+        size_title = QLabel(T("サイズ"))
         ctrl.addWidget(size_title)
         size_val_lbl = QLabel("")
         ctrl.addWidget(size_val_lbl)
@@ -8345,7 +10739,7 @@ class MainWindow(QMainWindow):
         size_slider.setValue(int(round(float(info.get("scale", 1.0)) * 100)))
         ctrl.addWidget(size_slider)
 
-        margin_title = QLabel("四隅余白")
+        margin_title = QLabel(T("四隅余白"))
         ctrl.addWidget(margin_title)
         margin_spin = QDoubleSpinBox()
         margin_spin.setRange(OVERLAY.MIN_MARGIN_REL, OVERLAY.MAX_MARGIN_REL)
@@ -8358,7 +10752,7 @@ class MainWindow(QMainWindow):
         ctrl.addWidget(margin_slider)
         ctrl.addWidget(margin_spin)
 
-        xy_title = QLabel("手動位置")
+        xy_title = QLabel(T("手動位置"))
         ctrl.addWidget(xy_title)
         x_spin = QDoubleSpinBox()
         x_spin.setRange(-0.5, 1.5); x_spin.setSingleStep(0.01); x_spin.setDecimals(3)
@@ -8383,7 +10777,7 @@ class MainWindow(QMainWindow):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         ok_btn = QPushButton("OK"); ok_btn.setObjectName("accent")
-        cancel_btn = QPushButton("キャンセル")
+        cancel_btn = QPushButton(T("キャンセル"))
         btn_row.addWidget(cancel_btn)
         btn_row.addWidget(ok_btn)
         root.addLayout(btn_row)
@@ -8538,12 +10932,12 @@ class MainWindow(QMainWindow):
         def _refresh_preview():
             logo_path = logo_edit.text().strip()
             if not os.path.isfile(path):
-                preview_lbl.setText("画像が見つかりません")
+                preview_lbl.setText(T("画像が見つかりません"))
                 preview_lbl.setPixmap(QPixmap())
                 return
             base_px = QPixmap(path)
             if base_px.isNull():
-                preview_lbl.setText("画像を読み込めません")
+                preview_lbl.setText(T("画像を読み込めません"))
                 preview_lbl.setPixmap(QPixmap())
                 return
             if not logo_path or not os.path.isfile(logo_path):
@@ -8640,7 +11034,7 @@ class MainWindow(QMainWindow):
 
         def _browse():
             p, _ = QFileDialog.getOpenFileName(
-                dlg, "ロゴ画像を選択", "", "画像ファイル (*.png *.PNG *.jpg *.jpeg *.webp)")
+                dlg, T("ロゴ画像を選択"), "", T("画像ファイル (*.png *.PNG *.jpg *.jpeg *.webp)"))
             if p:
                 logo_edit.setText(p)
                 _refresh_preview()
@@ -8685,17 +11079,17 @@ class MainWindow(QMainWindow):
                         corner=state["corner"],
                         margin_rel=margin_spin.value(),
                     )
-                self._show_fade_message(f"🎨 {len(apply_paths)}件にロゴを設定しました")
+                self._show_fade_message(f"🎨 {len(apply_paths)}{Te('件にロゴを設定しました')}")
                 self._overlay_refresh_preview(apply_paths)
             except Exception:
                 import traceback
-                _ErrorDialog.show_error("ロゴ調整保存エラー", traceback.format_exc(), self)
+                _ErrorDialog.show_error(T("ロゴ調整保存エラー"), traceback.format_exc(), self)
 
     def _overlay_remove(self, paths: list):
         """選択ファイルのオーバーレイ設定を削除する。"""
         for p in paths:
             OVERLAY.remove(p)
-        self._show_fade_message(f"🗑 {len(paths)}件のロゴ設定を削除しました")
+        self._show_fade_message(f"🗑 {len(paths)}{Te('件のロゴ設定を削除しました')}")
         self._overlay_refresh_preview(paths)
 
     def _overlay_export(self, paths: list):
@@ -8703,12 +11097,12 @@ class MainWindow(QMainWindow):
         if len(paths) == 1:
             default_name = os.path.splitext(os.path.basename(paths[0]))[0] + "_logo.png"
             out, _ = QFileDialog.getSaveFileName(
-                self, "合成画像を保存", default_name, "PNG (*.png);;JPEG (*.jpg *.jpeg)")
+                self, T("合成画像を保存"), default_name, "PNG (*.png);;JPEG (*.jpg *.jpeg)")
             if not out:
                 return
             targets = [(paths[0], out)]
         else:
-            out_dir = QFileDialog.getExistingDirectory(self, "出力フォルダを選択")
+            out_dir = QFileDialog.getExistingDirectory(self, T("出力フォルダを選択"))
             if not out_dir:
                 return
             targets = [
@@ -8723,17 +11117,17 @@ class MainWindow(QMainWindow):
             try:
                 base_px = QPixmap(src_path)
                 if base_px.isNull():
-                    raise ValueError("画像を読み込めません")
+                    raise ValueError(T("画像を読み込めません"))
                 composed = self._compose_overlay(base_px, src_path, base_px.width(), base_px.height())
                 if not composed.save(dst_path):
-                    raise ValueError("保存に失敗しました")
+                    raise ValueError(T("保存に失敗しました"))
                 done += 1
             except Exception as ex:
                 errors.append(f"{os.path.basename(src_path)}: {ex}")
 
-        self._show_fade_message(f"💾 {done}件を出力しました")
+        self._show_fade_message(f"💾 {done}{Te('件を出力しました')}")
         if errors:
-            QMessageBox.warning(self, "出力エラー", "\n".join(errors))
+            QMessageBox.warning(self, T("出力エラー"), "\n".join(errors))
 
     def _overlay_refresh_preview(self, paths: list[str] | None = None):
         """オーバーレイ変更後にプレビューを再描画する。"""
@@ -8744,19 +11138,19 @@ class MainWindow(QMainWindow):
     def _open_overlay_tag_settings(self):
         """タグ→ロゴ紐付け設定ダイアログ（v2.03）"""
         dlg = QDialog(self)
-        dlg.setWindowTitle("🎨 ロゴ/タグ連動設定")
+        dlg.setWindowTitle(T("🎨 ロゴ/タグ連動設定"))
         dlg.resize(600, 420)
         vl = QVBoxLayout(dlg)
         vl.setContentsMargins(12, 10, 12, 10)
 
         desc = QLabel(
-            "プロンプトに指定したタグが含まれる画像に自動でロゴを適用します。\n"
-            "手動でロゴを設定済みの画像には自動適用されません。")
+            T("プロンプトに指定したタグが含まれる画像に自動でロゴを適用します。\n"
+            "手動でロゴを設定済みの画像には自動適用されません。"))
         desc.setWordWrap(True)
         vl.addWidget(desc)
 
         table = QTableWidget(0, 2)
-        table.setHorizontalHeaderLabels(["タグ（部分一致）", "ロゴ画像パス"])
+        table.setHorizontalHeaderLabels([T("タグ（部分一致）"), T("ロゴ画像パス")])
         table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.ResizeToContents)
         table.horizontalHeader().setSectionResizeMode(
@@ -8774,23 +11168,23 @@ class MainWindow(QMainWindow):
         _refresh()
 
         btn_row = QHBoxLayout()
-        add_btn   = QPushButton("➕ 追加")
-        del_btn   = QPushButton("🗑 削除")
-        close_btn = QPushButton("閉じる"); close_btn.setObjectName("accent")
+        add_btn   = QPushButton(T("➕ 追加"))
+        del_btn   = QPushButton(T("🗑 削除"))
+        close_btn = QPushButton(T("閉じる")); close_btn.setObjectName("accent")
 
         def _add():
-            tag, ok = QInputDialog.getText(dlg, "タグ追加", "タグ名（部分一致）:")
+            tag, ok = QInputDialog.getText(dlg, T("タグ追加"), T("タグ名（部分一致）:"))
             if not ok or not tag.strip():
                 return
             logo, _ = QFileDialog.getOpenFileName(
-                dlg, "ロゴ画像を選択", "", "画像ファイル (*.png *.PNG *.jpg *.jpeg *.webp)")
+                dlg, T("ロゴ画像を選択"), "", T("画像ファイル (*.png *.PNG *.jpg *.jpeg *.webp)"))
             if not logo:
                 return
             try:
                 logo = import_logo_as_webp(logo, tag.strip())
             except Exception:
                 import traceback
-                _ErrorDialog.show_error("ロゴ登録エラー", traceback.format_exc(), dlg)
+                _ErrorDialog.show_error(T("ロゴ登録エラー"), traceback.format_exc(), dlg)
                 return
             OVERLAY.tag_to_logo[tag.strip()] = logo
             OVERLAY.save(); _refresh()
@@ -8844,11 +11238,8 @@ class MainWindow(QMainWindow):
             if old_logo_dir.resolve() != new_logo_dir.resolve():
                 answer = QMessageBox.question(
                     self,
-                    "ロゴ保存先の変更",
-                    "ロゴの保存先が変更されました。\n\n"
-                    f"現在: {old_logo_dir}\n"
-                    f"変更先: {new_logo_dir}\n\n"
-                    "既存のロゴ画像を新しい保存先へ移動しますか？",
+                    T("ロゴ保存先の変更"),
+                    f"{Te('ロゴの保存先が変更されました。␜n␜n')}"f"{Te('現在: ')}{old_logo_dir}\n"f"{Te('変更先: ')}{new_logo_dir}\n\n"f"{Te('既存のロゴ画像を新しい保存先へ移動しますか？')}",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.Yes,
                 )
@@ -8866,10 +11257,15 @@ class MainWindow(QMainWindow):
             self._cfg["logo_folder"] = str(get_logo_dir())
             self._cfg["enabled_exts"] = self._enabled_exts
             self._cfg["loop_mode"]    = self._loop_mode
+            new_lang = self._cfg.get("language")
+            if new_lang and new_lang != _UI_LANG:
+                # 以降に作られるダイアログは新言語で描かれる。再起動で完全反映。
+                set_ui_language(new_lang)
+                QMessageBox.information(self, T("表示言語"), T("アプリを再起動すると新しい言語で表示されます"))
             save_cfg(self._cfg)
             if hasattr(self, "_ext_btn"):
                 self._ext_btn.setText(self._ext_indicator_text())
-            self._set_status("環境設定を保存しました")
+            self._set_status(T("環境設定を保存しました"))
             if changed_exts and self._cur_folder:
                 self._load_folder(self._cur_folder)
             return True
@@ -8877,17 +11273,15 @@ class MainWindow(QMainWindow):
 
     def _ext_indicator_text(self):
         exts = [e[1:].upper() for e in SUPPORTED_EXTS if e in self._enabled_exts]
-        if len(exts) == len(SUPPORTED_EXTS): return "拡張子:全て"
-        return "拡張子:" + "/".join(exts) if exts else "拡張子:なし"
+        if len(exts) == len(SUPPORTED_EXTS): return T("拡張子:全て")
+        return T("拡張子:") + "/".join(exts) if exts else T("拡張子:なし")
 
     def _ensure_right_panel_visible(self):
         """右パネルが非表示なら強制表示する（明示的要求なのでフラグをリセット）"""
-        if not self._right_panel_visible:
-            self._user_collapsed_right = False
-            self._toggle_right_btn.blockSignals(True)
-            self._toggle_right_btn.setChecked(True)
-            self._toggle_right_btn.blockSignals(False)
-            self._toggle_right_panel(True)
+        if self._right_panel_visible:
+            return
+        self._user_collapsed_right = False
+        self._toggle_right_panel(True)   # 末尾で ≡ とメニュー項目も同期される
 
     def _toggle_left_panel(self, visible: bool):
         """フォルダツリー（_left_main_content）を表示/非表示する。
@@ -8981,6 +11375,10 @@ class MainWindow(QMainWindow):
             self._toggle_right_action.blockSignals(True)
             self._toggle_right_action.setChecked(visible)
             self._toggle_right_action.blockSignals(False)
+        if hasattr(self, "_right_panel_toggle_btn"):
+            self._right_panel_toggle_btn.blockSignals(True)
+            self._right_panel_toggle_btn.setChecked(visible)
+            self._right_panel_toggle_btn.blockSignals(False)
 
     def _switch_layout(self, layout_id: str):
         """レイアウト A-E の切り替え（ユーザー操作用エントリポイント）。
@@ -8993,15 +11391,32 @@ class MainWindow(QMainWindow):
             return
         self._apply_layout_by_id(layout_id)
 
+    def _on_layout_combo_changed(self, index: int):
+        """表示プルダウンの変更 → レイアウト切り替え。"""
+        if not hasattr(self, "_layout_combo"):
+            return
+        lid = self._layout_combo.itemData(index)
+        if not lid or not isinstance(lid, str):
+            return
+        self._switch_layout(lid)
+
     def _apply_layout_by_id(self, layout_id: str):
         """レイアウトを実際に適用する内部メソッド。
         ⚠ AI向け注意: early-return なし。起動時復元・_switch_layout の両方から呼ばれる。
            cfg["layout"] の現在値に関係なく必ず実行される。
            外部から直接呼ぶ場合はこちらを使うこと（起動時レイアウト復元など）。"""
         self._cfg["layout"] = layout_id
-        # ⚠ setCheckable(False) のためsetCheckedは使えない。
-        # カスタムプロパティ active="true/false" でQSSハイライトを制御する。
-        for lid, btn in self._layout_btns.items():
+        # プルダウンの選択を同期（シグナル再発火防止）
+        if hasattr(self, "_layout_combo"):
+            for i in range(self._layout_combo.count()):
+                if self._layout_combo.itemData(i) == layout_id:
+                    if self._layout_combo.currentIndex() != i:
+                        self._layout_combo.blockSignals(True)
+                        self._layout_combo.setCurrentIndex(i)
+                        self._layout_combo.blockSignals(False)
+                    break
+        # 旧ボタンUIとの互換（空dictの場合は何もしない）
+        for lid, btn in getattr(self, "_layout_btns", {}).items():
             active = (lid == layout_id)
             btn.setProperty("active", "true" if active else "false")
             btn.style().unpolish(btn)
@@ -9046,9 +11461,6 @@ class MainWindow(QMainWindow):
                 self._toggle_left_action.blockSignals(True)
                 self._toggle_left_action.setChecked(True)
                 self._toggle_left_action.blockSignals(False)
-            self._toggle_left_btn.blockSignals(True)
-            self._toggle_left_btn.setChecked(True)
-            self._toggle_left_btn.blockSignals(False)
             if hasattr(self, "_left_collapse_btn"):
                 self._left_collapse_btn.blockSignals(True)
                 self._left_collapse_btn.setChecked(True)
@@ -9068,9 +11480,10 @@ class MainWindow(QMainWindow):
                 self._toggle_right_action.blockSignals(True)
                 self._toggle_right_action.setChecked(True)
                 self._toggle_right_action.blockSignals(False)
-            self._toggle_right_btn.blockSignals(True)
-            self._toggle_right_btn.setChecked(True)
-            self._toggle_right_btn.blockSignals(False)
+            if hasattr(self, "_right_panel_toggle_btn"):
+                self._right_panel_toggle_btn.blockSignals(True)
+                self._right_panel_toggle_btn.setChecked(True)
+                self._right_panel_toggle_btn.blockSignals(False)
 
     def _apply_layout_A(self):
         """A(小): デフォルト — 右パネルにプレビュー＋メタ情報"""
@@ -9171,6 +11584,7 @@ class MainWindow(QMainWindow):
             s = sp.sizes()
             if any(v > 0 for v in s):
                 self._cfg[key] = s
+                # [v2.05.1 OPT] D5: デバウンス経由で保存 (カクつき防止)
                 self._splitter_save_timer.start()
         hsplit.splitterMoved.connect(_save_BC)
 
@@ -9217,6 +11631,8 @@ class MainWindow(QMainWindow):
         self._install_preview_resize(prev)
 
         # 下部グリッド: サムネを小さく固定
+        # [v2.05 FIX] D4: ユーザ設定サイズを退避
+        self._pre_layout_D_size = self._size_slider.value()
         self._grid.set_thumb_size(90)
         self._size_slider.setValue(90)
 
@@ -9242,6 +11658,7 @@ class MainWindow(QMainWindow):
             sizes = sp.sizes()
             if any(s > 0 for s in sizes):
                 self._cfg["layout_D_vsplit_pos"] = sizes
+                # [v2.05.1 OPT] D5: デバウンス経由で保存
                 self._splitter_save_timer.start()
         vsplit.splitterMoved.connect(_save_D)
 
@@ -9302,8 +11719,7 @@ class MainWindow(QMainWindow):
         キャッシュヒット時は即描画、ミス時はPreviewLoaderをQThreadPoolに投入."""
         lbl.setProperty("_preview_path", path)
         k = f"__prev__{path}"
-        with _mem_lock:
-            cached = _mem.get(k)
+        cached = _mem_get(k)
         if cached:
             # キャッシュヒット: 即描画（I/O ゼロ）
             cached_px = as_pixmap(cached)
@@ -9318,8 +11734,22 @@ class MainWindow(QMainWindow):
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation))
             return
-        # キャッシュミス: ラベルをクリアして非同期ロード開始
-        lbl.clear()
+        # キャッシュミス: サムネがメモリにあれば仮表示してから非同期ロード開始 (v2.06 P1)
+        placeholder = None
+        try:
+            tsize = getattr(getattr(self, "_grid", None), "_thumb_size", 0)
+            if tsize:
+                cached_thumb = _mem_get(f"{path}:{tsize}")
+                if cached_thumb is not None:
+                    placeholder = as_pixmap(cached_thumb)
+        except Exception:
+            placeholder = None
+        if placeholder is not None and not placeholder.isNull():
+            lbl.setPixmap(placeholder.scaled(pw, ph,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation))
+        else:
+            lbl.clear()
         # 同じラベル宛の既存ローダーをキャンセル
         loader_attr = f"_active_preview_loader_{id(lbl)}"
         old_loader = getattr(self, loader_attr, None)
@@ -9329,12 +11759,20 @@ class MainWindow(QMainWindow):
         setattr(self, loader_attr, loader)
         loader.signals.loaded.connect(
             lambda p, px, l=lbl, w=pw, h=ph: self._on_preview_loaded(p, px, l, w, h))
-        QThreadPool.globalInstance().start(loader)
+        QThreadPool.globalInstance().start(loader, 10)  # v2.06 P1: サムネ群より高優先
 
     def _compose_overlay(self, base_px: "QPixmap", path: str,
                          max_w: int, max_h: int) -> "QPixmap":
-        """base_px にオーバーレイロゴを合成して返す（非破壊・表示専用）。
-        オーバーレイ設定がなくても品質バッジは重ねる。(v2.06)"""
+        """base_px にオーバーレイロゴ・評価バッジを合成して返す（非破壊・表示専用）。
+        合成要素が無い場合はスケールのみ返す高速パス (v2.06 P2)。"""
+        info = OVERLAY.get(path)
+        rating_text = self._rating_badge_text(path)
+        if not info and not rating_text:
+            # v2.06 P2: オーバーレイ・バッジとも無い場合は painter 合成を省略
+            return base_px.scaled(max_w, max_h,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation)
+
         scaled = base_px.scaled(max_w, max_h,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation)
@@ -9346,15 +11784,14 @@ class MainWindow(QMainWindow):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.drawPixmap(0, 0, scaled)
 
-        info = OVERLAY.get(path)
         sw = scaled.width()
         sh = scaled.height()
 
         if info:
             logo_path = info.get("logo_path", "")
             if logo_path and os.path.isfile(logo_path):
-                logo_px = QPixmap(logo_path)
-                if not logo_px.isNull():
+                logo_px = _get_logo_pixmap(logo_path)  # v2.06 P2: デコード結果はキャッシュ
+                if logo_px is not None:
                     # ロゴの基準サイズ:
                     # 縦長画像は表示幅の 1/2、横長画像は表示幅の 1/3 を既定値とし、
                     # scale はその基準に対する倍率として扱う。
@@ -9399,7 +11836,6 @@ class MainWindow(QMainWindow):
                         Qt.TransformationMode.SmoothTransformation)
                     painter.drawPixmap(x, y, logo_scaled)
 
-        rating_text = self._rating_badge_text(path)
         if rating_text:
             font = painter.font()
             font.setBold(True)
@@ -9481,6 +11917,10 @@ class MainWindow(QMainWindow):
             if not self._right_panel_widget.isVisible():
                 self._right_panel_widget.show()
             self._right_panel_visible = True
+            if hasattr(self, "_right_panel_toggle_btn"):
+                self._right_panel_toggle_btn.blockSignals(True)
+                self._right_panel_toggle_btn.setChecked(True)
+                self._right_panel_toggle_btn.blockSignals(False)
 
         # 左パネルは C/E でも hide しなくなったため復元処理は不要
         # （_toggle_left_panel や _user_collapsed_left の管理は従来通り）
@@ -9489,7 +11929,14 @@ class MainWindow(QMainWindow):
         self._layout_preview = None
 
         # サムネサイズをスライダーの値に戻す
-        self._grid.set_thumb_size(self._size_slider.value())
+        # [v2.05 FIX] D4: レイアウトD 退避サイズを復元
+        restore_size = getattr(self, "_pre_layout_D_size", None)
+        if restore_size is not None:
+            self._size_slider.setValue(restore_size)
+            self._grid.set_thumb_size(restore_size)
+            self._pre_layout_D_size = None
+        else:
+            self._grid.set_thumb_size(self._size_slider.value())
 
     def _hide_right_preview(self):
         """右パネルのプレビューエリア（ヘッダー + ラベル）を非表示にする。
@@ -9530,15 +11977,15 @@ class MainWindow(QMainWindow):
         left  = sizes[0] if sizes else 190
         right = sizes[2] if len(sizes)>2 else 320
 
-        dlg = QDialog(self); dlg.setWindowTitle("パネル幅の設定")
+        dlg = QDialog(self); dlg.setWindowTitle(T("パネル幅の設定"))
         dlg.setFixedSize(320, 180)
         fl = QFormLayout(dlg)
         l_spin = QSpinBox(); l_spin.setRange(80,600); l_spin.setValue(left)
         r_spin = QSpinBox(); r_spin.setRange(80,800); r_spin.setValue(right)
-        fl.addRow("左パネル幅 (px):", l_spin)
-        fl.addRow("右パネル幅 (px):", r_spin)
+        fl.addRow(T("左パネル幅 (px):"), l_spin)
+        fl.addRow(T("右パネル幅 (px):"), r_spin)
         bf = QHBoxLayout(); bf.addStretch()
-        ok = QPushButton("適用"); ok.setObjectName("accent")
+        ok = QPushButton(T("適用")); ok.setObjectName("accent")
         ok.clicked.connect(lambda: (
             self._set_main_splitter_sizes([l_spin.value(), 9999, r_spin.value()], [0, 100, 22]),
             dlg.accept()))
@@ -9553,7 +12000,7 @@ class MainWindow(QMainWindow):
         self._main_container.layout().addWidget(self._console)
         visible = self._cfg.get("console_visible", False)
         self._set_console_visible(visible)
-        self._log("アプリケーション起動", _ConsolePanel.LEVEL_OK)
+        self._log(T("アプリケーション起動"), _ConsolePanel.LEVEL_OK)
 
     def _set_console_visible(self, visible: bool):
         """アクティビティログの表示状態を各UI部品へ同期する。"""
@@ -9721,6 +12168,12 @@ class MainWindow(QMainWindow):
             self._delete_path(sel[0], permanent=permanent)
 
     def _on_key_enter(self):
+        # [v2.05.2 FIX] アドレスバー(QLineEdit)にフォーカスがある場合は
+        # returnPressed シグナルに処理を委譲し、FullViewer を開かない。
+        # QShortcut が QLineEdit の Enter を先消費してしまう問題の対策。
+        focus_widget = QApplication.focusWidget()
+        if isinstance(focus_widget, QLineEdit):
+            return  # QLineEdit 側の returnPressed に任せる
         if self._sel_path: self._open_full(self._sel_path)
 
     def _rename_selected(self):
@@ -9728,7 +12181,7 @@ class MainWindow(QMainWindow):
         path = self._sel_path
         if not path: return
         old_name = os.path.basename(path)
-        new_name, ok = QInputDialog.getText(self, "名前の変更", "新しいファイル名:", text=old_name)
+        new_name, ok = QInputDialog.getText(self, T("名前の変更"), T("新しいファイル名:"), text=old_name)
         if not ok or not new_name or new_name == old_name: return
         new_path = os.path.join(os.path.dirname(path), new_name)
         try:
@@ -9742,9 +12195,9 @@ class MainWindow(QMainWindow):
             META.invalidate(path)
             self._grid.set_images_keep_scroll(self._filtered or self._all_paths)
             self._sel_image(new_path)
-            self._set_status(f"名前変更: {old_name} → {new_name}")
+            self._set_status(f"{Te('名前変更: ')}{old_name} → {new_name}")
         except Exception as ex:
-            QMessageBox.critical(self, "エラー", str(ex))
+            QMessageBox.critical(self, T("エラー"), str(ex))
 
     def _show_properties(self):
         """Alt+Enter / Alt+F1: プロパティダイアログ"""
@@ -9756,40 +12209,44 @@ class MainWindow(QMainWindow):
             w, h = img.width, img.height
             img.close()
         except Exception as ex:
-            QMessageBox.warning(self, "プロパティ", str(ex)); return
+            QMessageBox.warning(self, T("プロパティ"), str(ex)); return
         size_kb = st.st_size / 1024
         size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb/1024:.2f} MB"
         ctime = datetime.fromtimestamp(st.st_ctime).strftime('%Y-%m-%d %H:%M:%S')
         mtime = datetime.fromtimestamp(st.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
         text = (
-            f"ファイル名: {os.path.basename(path)}\n"
-            f"場所: {os.path.dirname(path)}\n"
-            f"サイズ: {size_str} ({st.st_size:,} バイト)\n"
-            f"画像サイズ: {w} × {h} px\n"
-            f"作成日時: {ctime}\n"
-            f"更新日時: {mtime}"
+            f"{Te('ファイル名: ')}{os.path.basename(path)}\n"f"{Te('場所: ')}{os.path.dirname(path)}\n"f"{Te('サイズ: ')}{size_str} ({st.st_size:,}{Te(' バイト)␜n')}"f"{Te('画像サイズ: ')}{w} × {h} px\n"f"{Te('作成日時: ')}{ctime}\n"f"{Te('更新日時: ')}{mtime}"
         )
-        dlg = QDialog(self); dlg.setWindowTitle("プロパティ")
+        dlg = QDialog(self); dlg.setWindowTitle(T("プロパティ"))
         dlg.setMinimumWidth(420)
         vl = QVBoxLayout(dlg)
         te = QPlainTextEdit(text); te.setReadOnly(True)
         te.setFont(QFont("Consolas", 9))
         vl.addWidget(te)
         # コピーボタン
-        copy_btn = QPushButton("📋 コピー")
+        copy_btn = QPushButton(T("📋 コピー"))
         copy_btn.clicked.connect(lambda: (
             QApplication.clipboard().setText(text),
-            self._set_status("プロパティをコピーしました")))
+            self._set_status(T("プロパティをコピーしました"))))
         vl.addWidget(copy_btn)
         # OS ネイティブのプロパティを開くボタン（Windows）
         if sys.platform == 'win32':
-            native_btn = QPushButton("詳細プロパティを開く...")
+            native_btn = QPushButton(T("詳細プロパティを開く..."))
             native_btn.clicked.connect(lambda: (
                 os.startfile(path, 'properties') if hasattr(os, 'startfile') else None))
             vl.addWidget(native_btn)
-        ok_btn = QPushButton("閉じる"); ok_btn.clicked.connect(dlg.accept)
+        ok_btn = QPushButton(T("閉じる")); ok_btn.clicked.connect(dlg.accept)
         vl.addWidget(ok_btn)
         dlg.exec()
+
+    def _copy_path_to_clipboard(self, paths=None):
+        """右クリック: 選択ファイルのフルパスをテキストとしてクリップボードにコピー"""
+        if paths is None:
+            paths = self._grid.get_selection()
+        if not paths:
+            return
+        QApplication.clipboard().setText("\n".join(paths))
+        self._set_status(f"{len(paths)}{Te('件のパスをコピーしました')}")
 
     def _copy_to_clipboard(self):
         """Ctrl+C: 選択ファイルをクリップボードにコピー（ファイルとして）"""
@@ -9801,7 +12258,7 @@ class MainWindow(QMainWindow):
         # テキストとしてもパスをコピー
         mime.setText("\n".join(sel))
         QApplication.clipboard().setMimeData(mime)
-        self._set_status(f"{len(sel)}件をクリップボードにコピーしました")
+        self._set_status(f"{len(sel)}{Te('件をクリップボードにコピーしました')}")
         self._clipboard_cut = False
 
     def _cut_to_clipboard(self):
@@ -9810,7 +12267,7 @@ class MainWindow(QMainWindow):
         if not sel: return
         self._copy_to_clipboard()
         self._clipboard_cut = True
-        self._set_status(f"{len(sel)}件を切り取りました")
+        self._set_status(f"{len(sel)}{Te('件を切り取りました')}")
 
     def _paste_from_clipboard(self):
         """Ctrl+V: クリップボードからペースト"""
@@ -9835,23 +12292,23 @@ class MainWindow(QMainWindow):
         self._clipboard_cut = False
         self._reload_folder()
         if errors:
-            QMessageBox.critical(self, "エラー", "\n".join(errors))
+            QMessageBox.critical(self, T("エラー"), "\n".join(errors))
         else:
-            self._set_status(f"{len(paths)}件を貼り付けました")
+            self._set_status(f"{len(paths)}{Te('件を貼り付けました')}")
 
     def _new_folder(self):
         """Ctrl+Shift+N: 新しいフォルダを作成"""
         if not self._cur_folder: return
-        name, ok = QInputDialog.getText(self, "新しいフォルダ", "フォルダ名:")
+        name, ok = QInputDialog.getText(self, T("新しいフォルダ"), T("フォルダ名:"))
         if not ok or not name.strip(): return
         new_dir = os.path.join(self._cur_folder, name.strip())
         try:
             os.makedirs(new_dir, exist_ok=True)
             # ツリーを再読み込み
             self._fs_model.setRootPath(os.path.dirname(self._cur_folder))
-            self._set_status(f"フォルダを作成しました: {name}")
+            self._set_status(f"{Te('フォルダを作成しました: ')}{name}")
         except Exception as ex:
-            QMessageBox.critical(self, "エラー", str(ex))
+            QMessageBox.critical(self, T("エラー"), str(ex))
 
     def _select_all_deselect(self):
         """Ctrl+D: 選択解除"""
@@ -9864,13 +12321,11 @@ class MainWindow(QMainWindow):
 
     # ══ ダイアログ ════════════════════════════════════════════════════════
     def _show_version(self):
-        QMessageBox.about(self, f"バージョン情報",
-            f"<b>{APP_NAME} {APP_VERSION}</b><br><br>"
-            f"PySide6 版 — tkinter 版 v11 を完全書き直し<br>"
-            f"<br>依存: PySide6, Pillow")
+        QMessageBox.about(self, f"{Te('バージョン情報')}",
+            f"<b>{APP_NAME} {APP_VERSION}</b><br><br>"f"{Te('PySide6 版 — tkinter 版 v11 を完全書き直し<br>')}"f"{Te('<br>依存: PySide6, Pillow')}")
 
     def _show_shortcuts(self):
-        text = """
+        text = T("""
 キーボードショートカット
 
 [ファイル操作]
@@ -9926,19 +12381,19 @@ Space / F11     没入モード ON/OFF
 R               回転    +/-  ズーム
 0               等倍    S    スライドショー
 Esc/Enter       閉じる  Delete  削除
-"""
-        dlg = QDialog(self); dlg.setWindowTitle("キーボードショートカット")
+""")
+        dlg = QDialog(self); dlg.setWindowTitle(T("キーボードショートカット"))
         dlg.resize(400, 380)
         vl = QVBoxLayout(dlg)
         te = QPlainTextEdit(text); te.setReadOnly(True)
         te.setFont(QFont("Consolas",9))
         vl.addWidget(te)
-        copy_btn = QPushButton("📋 コピー")
+        copy_btn = QPushButton(T("📋 コピー"))
         copy_btn.clicked.connect(lambda: (
             QApplication.clipboard().setText(text),
-            self._set_status("ショートカット一覧をコピーしました")))
+            self._set_status(T("ショートカット一覧をコピーしました"))))
         vl.addWidget(copy_btn)
-        ok = QPushButton("閉じる"); ok.clicked.connect(dlg.accept)
+        ok = QPushButton(T("閉じる")); ok.clicked.connect(dlg.accept)
         vl.addWidget(ok)
         dlg.exec()
 
@@ -9956,14 +12411,16 @@ def main():
         except Exception:
             pass
         # python.exe → pythonw.exe で再起動（恒久的にコンソールなし）
-        exe = sys.executable
-        if exe and os.path.basename(exe).lower() == "python.exe":
-            pythonw = os.path.join(os.path.dirname(exe), "pythonw.exe")
-            if os.path.exists(pythonw):
-                import subprocess
-                subprocess.Popen([pythonw] + sys.argv,
-                                 creationflags=0x00000008)  # DETACHED_PROCESS
-                sys.exit(0)
+        # [v2.05 FIX] D8: PyInstaller フリーズ時はスキップ
+        if not getattr(sys, "frozen", False):
+            exe = sys.executable
+            if exe and os.path.basename(exe).lower() == "python.exe":
+                pythonw = os.path.join(os.path.dirname(exe), "pythonw.exe")
+                if os.path.exists(pythonw):
+                    import subprocess
+                    subprocess.Popen([pythonw] + sys.argv,
+                                     creationflags=0x00000008)  # DETACHED_PROCESS
+                    sys.exit(0)
 
     # コマンドライン引数からパスを取得（画像の既定プログラムとして起動された場合）
     initial_path = sys.argv[1] if len(sys.argv) >= 2 else ""

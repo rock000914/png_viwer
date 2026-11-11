@@ -12,8 +12,10 @@ AI 画像の制作・整理・確認と相性がよく、生成時のプロン�
 - 高速なスキャン、閲覧、サムネイル表示
 - PNG メタデータ解析と表示
 - LoRA / モデル情報の一覧管理と検索
+- 拡張検索: タグ・ファイル名・除外語・完全一致フレーズ・正規表現・日付/解像度/サイズ/Steps/CFG 範囲・検索履歴（「🔍詳細」パネル）
 - 重複検出、評価、Favorites、タグ集計
 - キャッシュを活かした軽快なフォルダ運用
+- 英語・中国語（簡体）・韓国語対応（環境設定の「言語 / Language」タブで選択。再起動で反映）
 
 ## Tech Points
 
@@ -30,7 +32,7 @@ AI 画像の制作・整理・確認と相性がよく、生成時のプロン�
 
 ```bash
 pip install -r requirements.txt
-python png_viewer_v203.py
+python png_viewer.py
 ```
 
 ## Optional Environment Variables
@@ -43,5 +45,5 @@ python png_viewer_v203.py
 ```powershell
 $env:PNG_VIEWER_DEFAULT_FOLDER = "D:\Images"
 $env:CIVITAI_API_KEY = "your_api_key"
-python .\png_viewer_v203.py
+python .\png_viewer.py
 ```

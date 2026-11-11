@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ["png_viewer_v203.py"],
+    ["png_viewer.py"],
     pathex=[],
     binaries=[],
     datas=[],
@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="PNG_Metadata_Viewer_v203_onefile",
+    name="png_viewer",
     icon=["app_icon.ico"],
     debug=False,
     bootloader_ignore_signals=False,
