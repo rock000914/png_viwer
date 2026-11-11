@@ -1,0 +1,5 @@
+# Windows の core.autocrlf=true でも Git フックが壊れないよう、
+# 実行スクリプトは LF 改行で保存/チェックアウトする。
+.githooks/** text eol=lf
+*.sh text eol=lf
+security_check.py text eol=lf
